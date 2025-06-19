@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
-import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send, CheckCircle, Loader2, ListChecks, Eye, EyeOff } from 'lucide-react';
+import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send, CheckCircle, Loader2, ListChecks, EyeOff } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { getTestQuestions, submitTestAnswers } from '@/ai/flows/test-session-flow';
@@ -88,8 +88,8 @@ export default function TakeTestPage() {
     };
   }, []);
 
-  const handleSubmitTest = useCallback(async (isAutoSubmit = false) => {
-    if (testSubmitted || isSubmitting) return; // Prevent multiple submissions
+  const handleSubmitTest = useCallback(async (isAutoSubmit = false, autoSubmitReason = "Proctoring violation") => {
+    if (testSubmitted || isSubmitting) return;
 
     setIsSubmitting(true);
     try {
@@ -102,10 +102,13 @@ export default function TakeTestPage() {
 
       const response = await submitTestAnswers({ testId: 'SAMPLE_TEST_001', answers: validAnswers });
       if (response.success) {
-        if (!isAutoSubmit) { // Only show generic success toast if not auto-submitted due to violation
+        if (isAutoSubmit) {
+             toast({ variant: 'destructive', title: "Test Terminated", description: `Test submitted automatically due to: ${autoSubmitReason}.` });
+             setSubmissionMessage(`Test submitted automatically due to: ${autoSubmitReason}. ${response.message || ''}`);
+        } else {
              toast({ title: "Test Submitted!", description: response.message });
+             setSubmissionMessage(response.message || "Test submitted successfully.");
         }
-        setSubmissionMessage(response.message || "Test submitted successfully.");
         setTestSubmitted(true);
         setTestStarted(false); 
       } else {
@@ -133,16 +136,15 @@ export default function TakeTestPage() {
       }, 1000);
     } else if (testStarted && timeLeft === 0 && !testSubmitted) {
       toast({ title: "Time's Up!", description: "Your test will be submitted automatically." });
-      handleSubmitTest(true); 
+      handleSubmitTest(true, "Time expired"); 
     }
     return () => clearInterval(timerId);
   }, [testStarted, timeLeft, testSubmitted, handleSubmitTest, toast]); 
   
-  useEffect(() => {
+ useEffect(() => {
     if (!testStarted || testSubmitted) {
-      // Ensure fullscreen is exited if test is no longer active
       if (document.fullscreenElement) {
-        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen:", err.message));
+        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on cleanup:", err.message));
       }
       return;
     }
@@ -157,54 +159,67 @@ export default function TakeTestPage() {
         (elem as any).msRequestFullscreen();
       }
     };
-    enterFullScreen();
+    if (!document.fullscreenElement) { // Attempt to enter fullscreen only if not already in it
+        enterFullScreen();
+    }
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = 'Are you sure you want to leave? Your test progress might be lost and the test will be submitted.';
-      // Consider auto-submitting here too, but be cautious as it can be triggered by legitimate refreshes if not handled carefully.
-      // For now, the warning is the primary deterrent.
     };
 
     const handleVisibilityChange = () => {
       if (document.hidden && testStarted && !testSubmitted) {
-        setProctoringWarning("AI Alert: Tab switched or window minimized. Test submitted automatically.");
-        toast({ variant: "destructive", title: "Proctoring Violation Detected", description: "Test submitted due to tab switch or window minimization." });
-        handleSubmitTest(true); 
+        const reason = "Tab switched or window minimized";
+        setProctoringWarning(`AI Alert: ${reason}. Test submitted automatically.`);
+        handleSubmitTest(true, reason); 
       }
     };
     
     const handleWindowBlur = () => {
       if (testStarted && !testSubmitted && document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML')) {
-         setProctoringWarning("AI Alert: Test window lost focus. Test submitted automatically.");
-         toast({ variant: "destructive", title: "Proctoring Violation Detected", description: "Test submitted due to window losing focus." });
-         handleSubmitTest(true);
+         const reason = "Test window lost focus";
+         setProctoringWarning(`AI Alert: ${reason}. Test submitted automatically.`);
+         handleSubmitTest(true, reason);
       }
+    };
+
+    const handleFullscreenChange = () => {
+        if (!document.fullscreenElement && testStarted && !testSubmitted) {
+            const reason = "Fullscreen mode exited";
+            setProctoringWarning(`AI Alert: ${reason}. Test submitted automatically.`);
+            handleSubmitTest(true, reason);
+        }
     };
 
     const disableContextMenu = (e: MouseEvent) => e.preventDefault();
 
     const disableShortcuts = (e: KeyboardEvent) => {
-       const prohibitedCtrlShift = ['i', 'I', 'j', 'J', 'c', 'C']; // Dev tools, inspect
-       const prohibitedCtrl = ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S', 'u', 'U', 'w', 'W', 'x', 'X', 'v', 'V']; // reload, new tab/window, print, save, view source, close tab, cut, copy, paste
-       const prohibitedKeys = ['F5', 'F11', 'F12', 'PrintScreen', 'ContextMenu']; // reload, fullscreen toggle, dev tools, print screen, context menu key
-       const isProhibitedCtrlShift = e.ctrlKey && e.shiftKey && prohibitedCtrlShift.includes(e.key);
-       const isProhibitedCtrl = e.ctrlKey && prohibitedCtrl.includes(e.key);
-       const isProhibitedMeta = e.metaKey && prohibitedCtrl.includes(e.key); // Cmd key for Mac
+       const prohibitedCtrlShift = ['i', 'I', 'j', 'J', 'c', 'C']; 
+       const prohibitedCtrl = ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S', 'u', 'U', 'w', 'W', 'x', 'X', 'v', 'V'];
+       const prohibitedKeys = ['F5', 'F11', 'F12', 'PrintScreen', 'ContextMenu'];
+       const isProhibitedCtrlShift = e.ctrlKey && e.shiftKey && prohibitedCtrlShift.includes(e.key.toLowerCase());
+       const isProhibitedCtrl = e.ctrlKey && prohibitedCtrl.includes(e.key.toLowerCase());
+       const isProhibitedMeta = e.metaKey && prohibitedCtrl.includes(e.key.toLowerCase()); 
        const isProhibitedKey = prohibitedKeys.includes(e.key) || (e.altKey && e.key === 'Tab');
 
 
       if (isProhibitedCtrlShift || isProhibitedCtrl || isProhibitedMeta || isProhibitedKey) {
         e.preventDefault();
-        setProctoringWarning("AI Alert: Prohibited shortcut/action detected. Test submitted automatically.");
-        toast({ variant: "destructive", title: "Proctoring Violation Detected", description: "Test submitted due to use of prohibited shortcut or action." });
-        handleSubmitTest(true);
+        const reason = "Prohibited shortcut or action detected";
+        setProctoringWarning(`AI Alert: ${reason}. Test submitted automatically.`);
+        handleSubmitTest(true, reason);
       }
     };
     
     window.addEventListener('beforeunload', handleBeforeUnload);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleWindowBlur);
+    document.addEventListener('fullscreenchange', handleFullscreenChange); 
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange); 
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange); 
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange); 
+
     document.addEventListener('contextmenu', disableContextMenu);
     document.addEventListener('keydown', disableShortcuts);
 
@@ -212,9 +227,14 @@ export default function TakeTestPage() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange); 
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+
       document.removeEventListener('contextmenu', disableContextMenu);
       document.removeEventListener('keydown', disableShortcuts);
-      if (document.fullscreenElement) { // Ensure exiting fullscreen when component unmounts or test ends
+      if (document.fullscreenElement) { 
         document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on cleanup:", err.message));
       }
     };
@@ -325,8 +345,8 @@ export default function TakeTestPage() {
             <ul className="list-disc list-inside space-y-1 text-muted-foreground bg-muted/50 p-4 rounded-md">
               <li>Ensure you are in a quiet, well-lit room, alone.</li>
               <li>Your webcam and microphone must remain on throughout the test.</li>
-              <li>The test will be proctored using AI. Any suspicious activity (tab switching, losing focus, prohibited shortcuts) will result in automatic test submission.</li>
-              <li>Do not switch tabs, open other applications, or use external devices.</li>
+              <li>The test will be proctored using AI. Any suspicious activity (tab switching, losing focus, exiting fullscreen, prohibited shortcuts) will result in automatic test submission.</li>
+              <li>Do not switch tabs, open other applications, interact with browser extensions, or use external devices.</li>
               <li>Copying, pasting, or screen recording is strictly prohibited.</li>
               <li>Certain browser actions (e.g., refresh, new tab, developer tools) are restricted and will lead to test termination.</li>
               <li>You have {formatTime(timeLeft)} to complete the test once started.</li>
@@ -409,7 +429,7 @@ export default function TakeTestPage() {
                   size="sm"
                   className={`w-full justify-start text-left ${answers[q.id.toString()]?.trim() ? 'font-semibold' : ''} ${currentQuestionIndex === index ? '' : (answers[q.id.toString()]?.trim() ? 'border-green-500' : 'border-muted') }`}
                   onClick={() => setCurrentQuestionIndex(index)}
-                  disabled={testSubmitted}
+                  disabled={testSubmitted || isSubmitting}
                 >
                   Q {index + 1} {answers[q.id.toString()]?.trim() ? <CheckCircle className="ml-auto h-4 w-4 text-green-600" /> : null}
                 </Button>
@@ -435,7 +455,7 @@ export default function TakeTestPage() {
                         variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
                         className="w-full justify-start text-left h-auto py-3 whitespace-normal"
                         onClick={() => handleAnswerChange(currentQ.id, option)}
-                        disabled={testSubmitted}
+                        disabled={testSubmitted || isSubmitting}
                       >
                         {option}
                       </Button>
@@ -453,7 +473,7 @@ export default function TakeTestPage() {
                       placeholder="Type your answer here..."
                       value={answers[currentQ.id.toString()] || ""}
                       onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
-                      disabled={testSubmitted}
+                      disabled={testSubmitted || isSubmitting}
                     />
                   </>
                 )}
@@ -465,7 +485,7 @@ export default function TakeTestPage() {
                         variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
                         className="w-full justify-start text-left h-auto py-3"
                         onClick={() => handleAnswerChange(currentQ.id, option)}
-                        disabled={testSubmitted}
+                        disabled={testSubmitted || isSubmitting}
                       >
                         {option}
                       </Button>
@@ -476,11 +496,11 @@ export default function TakeTestPage() {
             </ScrollArea>
           )}
           <CardFooter className="border-t p-3 flex justify-between shrink-0">
-            <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0 || testSubmitted}>
+            <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0 || testSubmitted || isSubmitting}>
               <ChevronLeft className="mr-1 h-4 w-4"/> Previous
             </Button>
             {currentQuestionIndex < shuffledQuestions.length - 1 ? (
-              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestions.length - 1, prev + 1))} disabled={testSubmitted}>
+              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestions.length - 1, prev + 1))} disabled={testSubmitted || isSubmitting}>
                 Next <ChevronRight className="ml-1 h-4 w-4"/>
               </Button>
             ) : (
@@ -516,6 +536,7 @@ export default function TakeTestPage() {
               <CardContent className="p-3 text-xs space-y-1 text-muted-foreground">
                   <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Fullscreen Active (Attempted)</p>
                   <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Tab Focus Monitored</p>
+                  <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Fullscreen Exit Monitored</p>
                   <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Page Exit/Refresh Warnings Active</p>
                   <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Shortcuts/Context Menu Restricted</p>
                   <p className="flex items-center gap-1"><Video className="h-3 w-3 text-green-500"/> Camera Streaming</p>
