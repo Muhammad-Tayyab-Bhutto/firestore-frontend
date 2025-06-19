@@ -1,5 +1,5 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, FileCheck2, DollarSign, BookOpenCheck, Briefcase, BarChart3, Activity } from "lucide-react";
+import { Users, FileCheck2, DollarSign, BookOpenCheck, Briefcase, BarChart3, Activity, FileText } from "lucide-react";
 import { Metadata } from "next";
 import Link from "next/link";
 
