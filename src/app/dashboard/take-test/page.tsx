@@ -23,6 +23,7 @@ export default function TakeTestPage() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(120 * 60); // 120 minutes in seconds
   const [questions, setQuestions] = useState<TestQuestion[]>([]);
+  const [shuffledQuestions, setShuffledQuestions] = useState<TestQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({}); // question.id (string) -> answer
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -58,21 +59,21 @@ export default function TakeTestPage() {
     }
   }, [toast]);
 
-  // Effect to request permissions if not already determined and test not started
   useEffect(() => {
     if (!testStarted && (hasCameraPermission === null || hasMicPermission === null)) {
       requestPermissions();
     }
   }, [testStarted, hasCameraPermission, hasMicPermission, requestPermissions]);
 
-  // Effect for cleaning up media stream tracks on component unmount
   useEffect(() => {
     const currentVideoRef = videoRef.current;
     return () => {
       if (currentVideoRef && currentVideoRef.srcObject) {
         const stream = currentVideoRef.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
-        currentVideoRef.srcObject = null; // Explicitly release the stream
+        if (currentVideoRef) { // Check again as it might be null in strict mode cleanup
+            currentVideoRef.srcObject = null;
+        }
       }
     };
   }, []);
@@ -90,7 +91,7 @@ export default function TakeTestPage() {
     }
     return () => clearInterval(timerId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [testStarted, timeLeft, testSubmitted]); // handleSubmitTest is stable due to useCallback
+  }, [testStarted, timeLeft, testSubmitted]); 
   
   const handleFullscreenAndFocus = useCallback(() => {
     if (testContainerRef.current && !document.fullscreenElement) {
@@ -135,21 +136,32 @@ export default function TakeTestPage() {
       });
       return;
     }
+    if (!videoRef.current?.srcObject && hasCameraPermission === true) {
+        toast({
+            variant: 'destructive',
+            title: 'Camera Stream Error',
+            description: 'Camera permission is granted, but the video stream is not available. Please try refreshing or checking browser settings.',
+        });
+        return;
+    }
+
 
     setIsLoadingQuestions(true);
     try {
       const { questions: fetchedQuestions } = await getTestQuestions({ testId: 'SAMPLE_TEST_001' }); 
       
       const array = [...fetchedQuestions];
+      // Fisher-Yates (Knuth) Shuffle
       for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [array[i], array[j]] = [array[j], array[i]];
       }
-      setQuestions(array);
+      setQuestions(fetchedQuestions); // Keep original order for reference if needed
+      setShuffledQuestions(array);   // Use shuffled questions for display
       
       setCurrentQuestionIndex(0);
       setAnswers({});
-      setTimeLeft(120 * 60); // Reset timer
+      setTimeLeft(120 * 60); 
       setTestStarted(true);
       setTestSubmitted(false);
       setProctoringWarning(null);
@@ -163,6 +175,7 @@ export default function TakeTestPage() {
     } catch (error) {
       toast({ variant: 'destructive', title: "Failed to Load Test", description: "Could not fetch test questions. Please try again."});
       console.error("Error fetching questions:", error);
+      setTestStarted(false); 
     } finally {
       setIsLoadingQuestions(false);
     }
@@ -180,10 +193,10 @@ export default function TakeTestPage() {
   };
 
   const handleSubmitTest = useCallback(async (isAutoSubmit = false) => {
-    if (!isAutoSubmit) {
-      const unansweredQuestions = questions.filter(q => !answers[q.id.toString()]?.trim());
-      if (unansweredQuestions.length > 0 && questions.length > 0) { // ensure questions are loaded
-        toast({ variant: "destructive", title: "Incomplete Test", description: `Please answer all ${questions.length} questions before submitting. You have ${unansweredQuestions.length} unanswered.` });
+    if (!isAutoSubmit && shuffledQuestions.length > 0) {
+      const unansweredQuestions = shuffledQuestions.filter(q => !answers[q.id.toString()]?.trim());
+      if (unansweredQuestions.length > 0) {
+        toast({ variant: "destructive", title: "Incomplete Test", description: `Please answer all ${shuffledQuestions.length} questions before submitting. You have ${unansweredQuestions.length} unanswered.` });
         return;
       }
     }
@@ -211,8 +224,7 @@ export default function TakeTestPage() {
           document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on submit:", err));
         }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [questions, answers, toast, router]); // Removed router if not directly used in submit, added questions, answers
+  }, [answers, toast, router, shuffledQuestions]); 
   
   if ((hasCameraPermission === null || hasMicPermission === null) && !testStarted) {
     return (
@@ -228,7 +240,7 @@ export default function TakeTestPage() {
     );
   }
   
-  const currentQ = testStarted && questions.length > 0 ? questions[currentQuestionIndex] : null;
+  const currentQ = testStarted && shuffledQuestions.length > 0 ? shuffledQuestions[currentQuestionIndex] : null;
 
   if (testSubmitted) {
     return (
@@ -242,7 +254,6 @@ export default function TakeTestPage() {
       </div>
     );
   }
-
 
   if (!testStarted) {
     return (
@@ -333,8 +344,8 @@ export default function TakeTestPage() {
       <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-4 p-4 overflow-hidden">
         <Card className="md:col-span-2 shadow-lg flex flex-col overflow-hidden">
           <CardHeader className="border-b">
-            <CardTitle>Question {currentQuestionIndex + 1} of {questions.length}</CardTitle>
-            <Progress value={questions.length > 0 ? ((currentQuestionIndex + 1) / questions.length) * 100 : 0} className="mt-2 h-2" />
+            <CardTitle>Question {currentQuestionIndex + 1} of {shuffledQuestions.length}</CardTitle>
+            <Progress value={shuffledQuestions.length > 0 ? ((currentQuestionIndex + 1) / shuffledQuestions.length) * 100 : 0} className="mt-2 h-2" />
           </CardHeader>
           {currentQ && (
             <CardContent className="flex-grow p-6 space-y-4 overflow-y-auto">
@@ -382,8 +393,8 @@ export default function TakeTestPage() {
             <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0}>
               <ChevronLeft className="mr-1 h-4 w-4"/> Previous
             </Button>
-            {currentQuestionIndex < questions.length - 1 ? (
-              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(questions.length - 1, prev + 1))}>
+            {currentQuestionIndex < shuffledQuestions.length - 1 ? (
+              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestions.length - 1, prev + 1))}>
                 Next <ChevronRight className="ml-1 h-4 w-4"/>
               </Button>
             ) : (
