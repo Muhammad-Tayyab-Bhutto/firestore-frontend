@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -5,9 +6,19 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
-import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send } from 'lucide-react';
+import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send, CheckCircle } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 
+// Placeholder questions - in a real app, these would likely come from a backend
+const initialQuestions = [
+  { id: 1, text: "What is the capital of France?", type: "mcq", options: ["Berlin", "Madrid", "Paris", "Rome"], answer: "" },
+  { id: 2, text: "Explain the concept of Object-Oriented Programming.", type: "text", answer: "" },
+  { id: 3, text: "Solve for x: 2x + 5 = 15", type: "mcq", options: ["3", "4", "5", "6"], answer: "" },
+  { id: 4, text: "What is 5! (5 factorial)?", type: "mcq", options: ["20", "60", "120", "240"], answer: "" },
+  { id: 5, text: "Describe the water cycle in three sentences.", type: "text", answer: "" },
+];
+
+type Question = typeof initialQuestions[0];
 
 export default function TakeTestPage() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
@@ -16,16 +27,11 @@ export default function TakeTestPage() {
   const [showWarning, setShowWarning] = useState<string | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(120 * 60); // 120 minutes in seconds
+  const [shuffledQuestions, setShuffledQuestions] = useState<Question[]>([]);
+  const [answers, setAnswers] = useState<Record<number, string>>({});
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const { toast } = useToast();
-
-  // Placeholder questions
-  const questions = [
-    { id: 1, text: "What is the capital of France?", type: "mcq", options: ["Berlin", "Madrid", "Paris", "Rome"] },
-    { id: 2, text: "Explain the concept of Object-Oriented Programming.", type: "text" },
-    { id: 3, text: "Solve for x: 2x + 5 = 15", type: "mcq", options: ["3", "4", "5", "6"] },
-  ];
 
   useEffect(() => {
     const requestPermissions = async () => {
@@ -53,7 +59,7 @@ export default function TakeTestPage() {
                     title: 'Devices Not Found',
                     description: 'No camera or microphone found. Please ensure they are connected and enabled.',
                 });
-                setHasCameraPermission(false); // Or set to false if camera is mandatory for mic check
+                setHasCameraPermission(false);
                 setHasMicPermission(false);
             } else {
                  toast({
@@ -75,7 +81,6 @@ export default function TakeTestPage() {
         requestPermissions();
     }
 
-    // Cleanup function to stop media tracks when component unmounts or test ends
     return () => {
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
@@ -91,10 +96,9 @@ export default function TakeTestPage() {
       }, 1000);
       return () => clearInterval(timerId);
     } else if (testStarted && timeLeft === 0) {
-      // Auto-submit logic or show time up message
       toast({ title: "Time's Up!", description: "Your test has been automatically submitted." });
       // Add actual submission logic here
-      setTestStarted(false); // Or navigate to a results page
+      setTestStarted(false); 
     }
   }, [testStarted, timeLeft, toast]);
 
@@ -108,9 +112,20 @@ export default function TakeTestPage() {
       });
       return;
     }
+
+    // Shuffle questions using Fisher-Yates algorithm
+    const array = [...initialQuestions];
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    setShuffledQuestions(array);
+    setCurrentQuestionIndex(0); // Reset to first question
+    setAnswers({}); // Reset answers
+
     setTestStarted(true);
     setTimeLeft(120 * 60); // Reset timer
-    // Simulate AI warnings
+    
     setTimeout(() => setShowWarning("AI Alert: Please keep your face clearly visible."), 30000);
     setTimeout(() => setShowWarning(null), 40000);
     setTimeout(() => setShowWarning("AI Alert: Multiple faces detected. Please ensure you are alone."), 90000);
@@ -122,6 +137,17 @@ export default function TakeTestPage() {
     const m = Math.floor((seconds % 3600) / 60);
     const s = seconds % 60;
     return `${h > 0 ? h.toString().padStart(2, '0') + ':' : ''}${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const handleAnswerChange = (questionId: number, answer: string) => {
+    setAnswers(prev => ({ ...prev, [questionId]: answer }));
+  };
+
+  const handleSubmitTest = () => {
+    // Placeholder for submission logic
+    console.log("Test submitted with answers:", answers);
+    toast({ title: "Test Submitted!", description: "Your answers have been recorded."});
+    setTestStarted(false);
   };
 
 
@@ -139,7 +165,7 @@ export default function TakeTestPage() {
     );
   }
   
-  const currentQ = questions[currentQuestionIndex];
+  const currentQ = testStarted && shuffledQuestions.length > 0 ? shuffledQuestions[currentQuestionIndex] : null;
 
   if (!testStarted) {
     return (
@@ -174,7 +200,7 @@ export default function TakeTestPage() {
               </Alert>
             )}
 
-            <div className="grid grid-cols-2 gap-4 pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
                 <div>
                     <h4 className="font-semibold mb-1 text-center">Camera Preview</h4>
                     <video ref={videoRef} className="w-full aspect-video rounded-md bg-muted border" autoPlay muted playsInline />
@@ -231,38 +257,47 @@ export default function TakeTestPage() {
         {/* Questions Area (Left/Main Panel) */}
         <Card className="md:col-span-2 shadow-lg flex flex-col overflow-hidden">
           <CardHeader className="border-b">
-            <CardTitle>Question {currentQuestionIndex + 1} of {questions.length}</CardTitle>
-            <Progress value={((currentQuestionIndex + 1) / questions.length) * 100} className="mt-2 h-2" />
+            <CardTitle>Question {currentQuestionIndex + 1} of {shuffledQuestions.length}</CardTitle>
+            <Progress value={((currentQuestionIndex + 1) / shuffledQuestions.length) * 100} className="mt-2 h-2" />
           </CardHeader>
-          <CardContent className="flex-grow p-6 space-y-4 overflow-y-auto">
-            <p className="text-lg">{currentQ.text}</p>
-            {currentQ.type === "mcq" && currentQ.options && (
-              <div className="space-y-2">
-                {currentQ.options.map((option, index) => (
-                  <Button key={index} variant="outline" className="w-full justify-start text-left h-auto py-3">
-                    {option}
-                  </Button>
-                ))}
-              </div>
-            )}
-            {currentQ.type === "text" && (
-              <textarea
-                rows={8}
-                className="w-full p-2 border rounded-md focus:ring-primary focus:border-primary text-sm"
-                placeholder="Type your answer here..."
-              />
-            )}
-          </CardContent>
+          {currentQ && (
+            <CardContent className="flex-grow p-6 space-y-4 overflow-y-auto">
+              <p className="text-lg">{currentQ.text}</p>
+              {currentQ.type === "mcq" && currentQ.options && (
+                <div className="space-y-2">
+                  {currentQ.options.map((option, index) => (
+                    <Button 
+                      key={index} 
+                      variant={answers[currentQ.id] === option ? "default" : "outline"} 
+                      className="w-full justify-start text-left h-auto py-3"
+                      onClick={() => handleAnswerChange(currentQ.id, option)}
+                    >
+                      {option}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {currentQ.type === "text" && (
+                <textarea
+                  rows={8}
+                  className="w-full p-2 border rounded-md focus:ring-primary focus:border-primary text-sm"
+                  placeholder="Type your answer here..."
+                  value={answers[currentQ.id] || ""}
+                  onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
+                />
+              )}
+            </CardContent>
+          )}
           <CardFooter className="border-t p-3 flex justify-between">
             <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0}>
               <ChevronLeft className="mr-1 h-4 w-4"/> Previous
             </Button>
-            {currentQuestionIndex < questions.length - 1 ? (
-              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(questions.length - 1, prev + 1))}>
+            {currentQuestionIndex < shuffledQuestions.length - 1 ? (
+              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestions.length - 1, prev + 1))}>
                 Next <ChevronRight className="ml-1 h-4 w-4"/>
               </Button>
             ) : (
-              <Button className="bg-green-600 hover:bg-green-700 text-white">
+              <Button onClick={handleSubmitTest} className="bg-green-600 hover:bg-green-700 text-white">
                 <Send className="mr-1 h-4 w-4"/> Submit Test
               </Button>
             )}
@@ -302,3 +337,6 @@ export default function TakeTestPage() {
     </div>
   );
 }
+
+
+    
