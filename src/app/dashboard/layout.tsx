@@ -8,7 +8,8 @@ import {
   CheckSquare, 
   CalendarClock, 
   Award,
-  BookOpenCheck
+  BookOpenCheck, // Kept for consistency, but will use ClipboardCheck for Take Test
+  ClipboardCheck // Added for Take Test
 } from 'lucide-react';
 
 const applicantNavItems = [
@@ -19,6 +20,7 @@ const applicantNavItems = [
   { href: "/dashboard/status", label: "Application Status", icon: CheckSquare },
   { href: "/dashboard/test-booking", label: "Book Test Slot", icon: CalendarClock },
   { href: "/dashboard/admit-card", label: "Admit Card", icon: Award },
+  { href: "/dashboard/take-test", label: "Take Test", icon: ClipboardCheck }, // New Item
 ];
 
 export default function DashboardLayout({

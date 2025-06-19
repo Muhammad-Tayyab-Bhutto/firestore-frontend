@@ -10,7 +10,8 @@ import {
   Settings,
   DollarSign,
   ClipboardList,
-  GraduationCap
+  GraduationCap,
+  CalendarClock // Added for Test Shifts
 } from 'lucide-react';
 
 const adminNavItems = [
@@ -19,6 +20,7 @@ const adminNavItems = [
   { href: "/admin/applications", label: "All Applications", icon: Users, badge: 5 }, // Example badge
   { href: "/admin/challan-verification", label: "Challan Verification", icon: FileCheck2, badge: 2 },
   { href: "/admin/test-centers", label: "Test Centers", icon: Building },
+  { href: "/admin/test-shifts", label: "Manage Test Shifts", icon: CalendarClock }, // New Item
   { href: "/admin/offer-letters", label: "Offer Letters", icon: FileText },
   { href: "/admin/enrollment", label: "Enrollment Tracking", icon: Briefcase },
   { isSectionTitle: true, label: "Configuration", icon: Users /* Dummy icon */ },
