@@ -9,8 +9,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send, CheckCircle, Loader2 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { getTestQuestions, submitTestAnswers } from '@/ai/flows/test-session-flow';
-import type { TestQuestion } from '@/ai/flows/test-session-types'; // Updated import path
-import { useRouter } from 'next/navigation'; // Added for redirecting
+import type { TestQuestion } from '@/ai/flows/test-session-types';
+import { useRouter } from 'next/navigation';
 
 export default function TakeTestPage() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
@@ -28,7 +28,7 @@ export default function TakeTestPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const testContainerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  const router = useRouter(); // Added for redirecting
+  const router = useRouter();
 
   const requestPermissions = useCallback(async () => {
     try {
@@ -58,17 +58,25 @@ export default function TakeTestPage() {
     }
   }, [toast]);
 
+  // Effect to request permissions if not already determined and test not started
   useEffect(() => {
-    if (!testStarted && hasCameraPermission === null && hasMicPermission === null) {
+    if (!testStarted && (hasCameraPermission === null || hasMicPermission === null)) {
       requestPermissions();
     }
+  }, [testStarted, hasCameraPermission, hasMicPermission, requestPermissions]);
+
+  // Effect for cleaning up media stream tracks on component unmount
+  useEffect(() => {
+    const currentVideoRef = videoRef.current;
     return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
+      if (currentVideoRef && currentVideoRef.srcObject) {
+        const stream = currentVideoRef.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
+        currentVideoRef.srcObject = null; // Explicitly release the stream
       }
     };
-  }, [testStarted, requestPermissions, hasCameraPermission, hasMicPermission]);
+  }, []);
+
 
   useEffect(() => {
     let timerId: NodeJS.Timeout;
@@ -81,10 +89,10 @@ export default function TakeTestPage() {
       handleSubmitTest(true); // Auto-submit
     }
     return () => clearInterval(timerId);
-  }, [testStarted, timeLeft, toast, testSubmitted]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testStarted, timeLeft, testSubmitted]); // handleSubmitTest is stable due to useCallback
   
   const handleFullscreenAndFocus = useCallback(() => {
-    // Fullscreen
     if (testContainerRef.current && !document.fullscreenElement) {
       testContainerRef.current.requestFullscreen().catch(err => {
         toast({variant: 'destructive', title: "Fullscreen Failed", description: "Could not enter fullscreen mode. Please try manually."})
@@ -92,17 +100,17 @@ export default function TakeTestPage() {
       });
     }
 
-    // Tab focus listener
     const handleVisibilityChange = () => {
-      if (document.hidden) {
+      if (document.hidden && testStarted && !testSubmitted) {
         setProctoringWarning("AI Alert: You have switched tabs/windows. This is being monitored.");
-        // In a real scenario, this could trigger more severe actions.
       } else {
         setProctoringWarning(null);
       }
     };
     const handleBlur = () => {
-       setProctoringWarning("AI Alert: Test window lost focus. Please return to the test immediately.");
+       if (testStarted && !testSubmitted) {
+        setProctoringWarning("AI Alert: Test window lost focus. Please return to the test immediately.");
+       }
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -111,11 +119,11 @@ export default function TakeTestPage() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
-      if (document.fullscreenElement) {
-        document.exitFullscreen();
+      if (document.fullscreenElement && testContainerRef.current && document.fullscreenElement === testContainerRef.current) {
+        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen:", err));
       }
     };
-  }, [toast]);
+  }, [toast, testStarted, testSubmitted]);
 
 
   const handleStartTest = async () => {
@@ -130,9 +138,8 @@ export default function TakeTestPage() {
 
     setIsLoadingQuestions(true);
     try {
-      const { questions: fetchedQuestions } = await getTestQuestions({ testId: 'SAMPLE_TEST_001' }); // Replace with actual test ID
+      const { questions: fetchedQuestions } = await getTestQuestions({ testId: 'SAMPLE_TEST_001' }); 
       
-      // Shuffle questions
       const array = [...fetchedQuestions];
       for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -142,20 +149,17 @@ export default function TakeTestPage() {
       
       setCurrentQuestionIndex(0);
       setAnswers({});
-      setTimeLeft(120 * 60);
+      setTimeLeft(120 * 60); // Reset timer
       setTestStarted(true);
       setTestSubmitted(false);
       setProctoringWarning(null);
       
-      // Setup fullscreen and focus listeners
       const cleanupFocusListeners = handleFullscreenAndFocus();
-      // Store cleanup function to call when test ends or component unmounts
       (window as any).cleanupFocusListeners = cleanupFocusListeners;
 
+      setTimeout(() => { if (testStarted && !testSubmitted) setProctoringWarning("AI Alert: Please keep your face clearly visible."); }, 30000);
+      setTimeout(() => { if (testStarted && !testSubmitted) setProctoringWarning(null); }, 40000);
 
-      // Simulate AI warnings
-      setTimeout(() => setProctoringWarning("AI Alert: Please keep your face clearly visible."), 30000);
-      setTimeout(() => setProctoringWarning(null), 40000);
     } catch (error) {
       toast({ variant: 'destructive', title: "Failed to Load Test", description: "Could not fetch test questions. Please try again."});
       console.error("Error fetching questions:", error);
@@ -175,10 +179,10 @@ export default function TakeTestPage() {
     setAnswers(prev => ({ ...prev, [questionId.toString()]: answer }));
   };
 
-  const handleSubmitTest = async (isAutoSubmit = false) => {
+  const handleSubmitTest = useCallback(async (isAutoSubmit = false) => {
     if (!isAutoSubmit) {
       const unansweredQuestions = questions.filter(q => !answers[q.id.toString()]?.trim());
-      if (unansweredQuestions.length > 0) {
+      if (unansweredQuestions.length > 0 && questions.length > 0) { // ensure questions are loaded
         toast({ variant: "destructive", title: "Incomplete Test", description: `Please answer all ${questions.length} questions before submitting. You have ${unansweredQuestions.length} unanswered.` });
         return;
       }
@@ -199,18 +203,18 @@ export default function TakeTestPage() {
         console.error("Error submitting answers:", error);
     } finally {
         setIsSubmitting(false);
-         // Cleanup fullscreen and focus listeners
         if ((window as any).cleanupFocusListeners) {
           (window as any).cleanupFocusListeners();
           delete (window as any).cleanupFocusListeners;
         }
-        if (document.fullscreenElement) {
-          document.exitFullscreen();
+        if (document.fullscreenElement && testContainerRef.current && document.fullscreenElement === testContainerRef.current) {
+          document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on submit:", err));
         }
     }
-  };
-
-  if (hasCameraPermission === null || hasMicPermission === null && !testStarted) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questions, answers, toast, router]); // Removed router if not directly used in submit, added questions, answers
+  
+  if ((hasCameraPermission === null || hasMicPermission === null) && !testStarted) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-10rem)]">
         <Card className="w-full max-w-md p-6 text-center">
@@ -267,8 +271,9 @@ export default function TakeTestPage() {
                 <AlertTriangle className="h-4 w-4" />
                 <AlertTitle>Permissions Required</AlertTitle>
                 <AlertDescription>
-                  Camera and microphone access are denied or unavailable. You cannot start the test.
+                  Camera and/or microphone access are denied or unavailable. You cannot start the test.
                   Please enable permissions in your browser settings and ensure your devices are connected.
+                  You may need to refresh the page after enabling permissions.
                 </AlertDescription>
               </Alert>
             )}
@@ -280,7 +285,7 @@ export default function TakeTestPage() {
                     {hasCameraPermission === true ? (
                         <p className="text-xs text-green-600 flex items-center justify-center mt-1"><Video className="h-3 w-3 mr-1"/> Camera Connected</p>
                     ) : (
-                        <p className="text-xs text-red-600 flex items-center justify-center mt-1"><Video className="h-3 w-3 mr-1"/> Camera Access Denied/Unavailable</p>
+                        <p className="text-xs text-red-600 flex items-center justify-center mt-1"><Video className="h-3 w-3 mr-1"/> Camera {hasCameraPermission === false ? "Denied/Unavailable" : "Checking..."}</p>
                     )}
                 </div>
                  <div>
@@ -291,7 +296,7 @@ export default function TakeTestPage() {
                      {hasMicPermission === true ? (
                         <p className="text-xs text-green-600 flex items-center justify-center mt-1"><Mic className="h-3 w-3 mr-1"/> Microphone Connected</p>
                     ) : (
-                        <p className="text-xs text-red-600 flex items-center justify-center mt-1"><Mic className="h-3 w-3 mr-1"/> Microphone Access Denied/Unavailable</p>
+                        <p className="text-xs text-red-600 flex items-center justify-center mt-1"><Mic className="h-3 w-3 mr-1"/> Microphone {hasMicPermission === false ? "Denied/Unavailable" : "Checking..."}</p>
                     )}
                 </div>
             </div>
@@ -300,7 +305,7 @@ export default function TakeTestPage() {
             <Button 
               onClick={handleStartTest} 
               className="w-full bg-accent hover:bg-accent/90 text-accent-foreground" 
-              disabled={isLoadingQuestions || hasCameraPermission === false || hasMicPermission === false}
+              disabled={isLoadingQuestions || hasCameraPermission !== true || hasMicPermission !== true}
             >
               {isLoadingQuestions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               {isLoadingQuestions ? "Loading Questions..." : "Start Test"}
@@ -314,7 +319,6 @@ export default function TakeTestPage() {
   // Test Interface
   return (
     <div ref={testContainerRef} className="flex flex-col h-[calc(100vh-4rem)] max-h-screen bg-muted/30">
-      {/* Header Bar */}
       <div className="bg-primary text-primary-foreground p-3 shadow-md flex justify-between items-center">
         <div className="flex items-center gap-2">
           <BookOpen className="h-6 w-6" />
@@ -326,9 +330,7 @@ export default function TakeTestPage() {
         </div>
       </div>
 
-      {/* Main Test Area */}
       <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-4 p-4 overflow-hidden">
-        {/* Questions Area (Left/Main Panel) */}
         <Card className="md:col-span-2 shadow-lg flex flex-col overflow-hidden">
           <CardHeader className="border-b">
             <CardTitle>Question {currentQuestionIndex + 1} of {questions.length}</CardTitle>
@@ -393,7 +395,6 @@ export default function TakeTestPage() {
           </CardFooter>
         </Card>
 
-        {/* Proctoring Area (Right Panel) */}
         <div className="space-y-4 flex flex-col">
           <Card className="shadow-md flex-none">
             <CardHeader className="pb-2">
