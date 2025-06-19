@@ -1,109 +1,121 @@
 
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
-import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send, CheckCircle } from 'lucide-react';
+import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send, CheckCircle, Loader2 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
-
-// Placeholder questions - in a real app, these would likely come from a backend
-const initialQuestions = [
-  { id: 1, text: "What is the capital of France?", type: "mcq", options: ["Berlin", "Madrid", "Paris", "Rome"], answer: "" },
-  { id: 2, text: "Explain the concept of Object-Oriented Programming.", type: "text", answer: "" },
-  { id: 3, text: "Solve for x: 2x + 5 = 15", type: "mcq", options: ["3", "4", "5", "6"], answer: "" },
-  { id: 4, text: "What is 5! (5 factorial)?", type: "mcq", options: ["20", "60", "120", "240"], answer: "" },
-  { id: 5, text: "Describe the water cycle in three sentences.", type: "text", answer: "" },
-];
-
-type Question = typeof initialQuestions[0];
+import { getTestQuestions, submitTestAnswers, type TestQuestion } from '@/ai/flows/test-session-flow';
 
 export default function TakeTestPage() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
   const [testStarted, setTestStarted] = useState(false);
-  const [showWarning, setShowWarning] = useState<string | null>(null);
+  const [testSubmitted, setTestSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
+  const [proctoringWarning, setProctoringWarning] = useState<string | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(120 * 60); // 120 minutes in seconds
-  const [shuffledQuestions, setShuffledQuestions] = useState<Question[]>([]);
-  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [questions, setQuestions] = useState<TestQuestion[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({}); // question.id (string) -> answer
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const testContainerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  useEffect(() => {
-    const requestPermissions = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        setHasCameraPermission(true);
-        setHasMicPermission(true);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-      } catch (error) {
-        console.error('Error accessing media devices:', error);
-        if (error instanceof Error) {
-            if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
-                 toast({
-                    variant: 'destructive',
-                    title: 'Permissions Denied',
-                    description: 'Camera and microphone access are required to take the test. Please enable them in your browser settings.',
-                });
-                setHasCameraPermission(false);
-                setHasMicPermission(false);
-            } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError"){
-                 toast({
-                    variant: 'destructive',
-                    title: 'Devices Not Found',
-                    description: 'No camera or microphone found. Please ensure they are connected and enabled.',
-                });
-                setHasCameraPermission(false);
-                setHasMicPermission(false);
-            } else {
-                 toast({
-                    variant: 'destructive',
-                    title: 'Error Accessing Devices',
-                    description: 'Could not access camera or microphone. Please check your browser settings and ensure no other app is using them.',
-                });
-            }
-        } else {
-            toast({
-                variant: 'destructive',
-                title: 'Unknown Device Error',
-                description: 'An unexpected error occurred while trying to access your camera and microphone.',
-            });
-        }
+  const requestPermissions = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setHasCameraPermission(true);
+      setHasMicPermission(true);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
       }
-    };
-    if (!testStarted) {
-        requestPermissions();
-    }
+    } catch (error) {
+      console.error('Error accessing media devices:', error);
+      const errorName = error instanceof Error ? error.name : "UnknownError";
+      let title = 'Error Accessing Devices';
+      let description = 'Could not access camera or microphone. Please check your browser settings and ensure no other app is using them.';
 
+      if (errorName === "NotAllowedError" || errorName === "PermissionDeniedError") {
+        title = 'Permissions Denied';
+        description = 'Camera and microphone access are required to take the test. Please enable them in your browser settings.';
+      } else if (errorName === "NotFoundError" || errorName === "DevicesNotFoundError") {
+        title = 'Devices Not Found';
+        description = 'No camera or microphone found. Please ensure they are connected and enabled.';
+      }
+      
+      toast({ variant: 'destructive', title, description });
+      setHasCameraPermission(false);
+      setHasMicPermission(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (!testStarted && hasCameraPermission === null && hasMicPermission === null) {
+      requestPermissions();
+    }
     return () => {
       if (videoRef.current && videoRef.current.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [testStarted, toast]);
+  }, [testStarted, requestPermissions, hasCameraPermission, hasMicPermission]);
 
   useEffect(() => {
-    if (testStarted && timeLeft > 0) {
-      const timerId = setInterval(() => {
+    let timerId: NodeJS.Timeout;
+    if (testStarted && timeLeft > 0 && !testSubmitted) {
+      timerId = setInterval(() => {
         setTimeLeft(prevTime => prevTime - 1);
       }, 1000);
-      return () => clearInterval(timerId);
-    } else if (testStarted && timeLeft === 0) {
-      toast({ title: "Time's Up!", description: "Your test has been automatically submitted." });
-      // Add actual submission logic here
-      setTestStarted(false); 
+    } else if (testStarted && timeLeft === 0 && !testSubmitted) {
+      toast({ title: "Time's Up!", description: "Your test will be submitted automatically." });
+      handleSubmitTest(true); // Auto-submit
     }
-  }, [testStarted, timeLeft, toast]);
+    return () => clearInterval(timerId);
+  }, [testStarted, timeLeft, toast, testSubmitted]);
+  
+  const handleFullscreenAndFocus = useCallback(() => {
+    // Fullscreen
+    if (testContainerRef.current && !document.fullscreenElement) {
+      testContainerRef.current.requestFullscreen().catch(err => {
+        toast({variant: 'destructive', title: "Fullscreen Failed", description: "Could not enter fullscreen mode. Please try manually."})
+        console.warn("Cannot enter fullscreen", err);
+      });
+    }
+
+    // Tab focus listener
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setProctoringWarning("AI Alert: You have switched tabs/windows. This is being monitored.");
+        // In a real scenario, this could trigger more severe actions.
+      } else {
+        setProctoringWarning(null);
+      }
+    };
+    const handleBlur = () => {
+       setProctoringWarning("AI Alert: Test window lost focus. Please return to the test immediately.");
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      }
+    };
+  }, [toast]);
 
 
-  const handleStartTest = () => {
+  const handleStartTest = async () => {
     if (hasCameraPermission === false || hasMicPermission === false) {
       toast({
         variant: 'destructive',
@@ -113,23 +125,43 @@ export default function TakeTestPage() {
       return;
     }
 
-    // Shuffle questions using Fisher-Yates algorithm
-    const array = [...initialQuestions];
-    for (let i = array.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [array[i], array[j]] = [array[j], array[i]];
-    }
-    setShuffledQuestions(array);
-    setCurrentQuestionIndex(0); // Reset to first question
-    setAnswers({}); // Reset answers
+    setIsLoadingQuestions(true);
+    try {
+      const { questions: fetchedQuestions } = await getTestQuestions({ testId: 'SAMPLE_TEST_001' }); // Replace with actual test ID
+      
+      // Shuffle questions
+      const array = [...fetchedQuestions];
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      setQuestions(array);
+      
+      setCurrentQuestionIndex(0);
+      setAnswers({});
+      setTimeLeft(120 * 60);
+      setTestStarted(true);
+      setTestSubmitted(false);
+      setProctoringWarning(null);
+      
+      // Setup fullscreen and focus listeners
+      const cleanupFocusListeners = handleFullscreenAndFocus();
+      // Store cleanup function to call when test ends or component unmounts
+      // This is a bit simplified; in a real app, manage this more robustly
+      (window as any).cleanupFocusListeners = cleanupFocusListeners;
 
-    setTestStarted(true);
-    setTimeLeft(120 * 60); // Reset timer
-    
-    setTimeout(() => setShowWarning("AI Alert: Please keep your face clearly visible."), 30000);
-    setTimeout(() => setShowWarning(null), 40000);
-    setTimeout(() => setShowWarning("AI Alert: Multiple faces detected. Please ensure you are alone."), 90000);
-    setTimeout(() => setShowWarning(null), 100000);
+
+      // Simulate AI warnings
+      setTimeout(() => setProctoringWarning("AI Alert: Please keep your face clearly visible."), 30000);
+      setTimeout(() => setProctoringWarning(null), 40000);
+      // setTimeout(() => setProctoringWarning("AI Alert: Multiple faces detected. Please ensure you are alone."), 90000);
+      // setTimeout(() => setProctoringWarning(null), 100000);
+    } catch (error) {
+      toast({ variant: 'destructive', title: "Failed to Load Test", description: "Could not fetch test questions. Please try again."});
+      console.error("Error fetching questions:", error);
+    } finally {
+      setIsLoadingQuestions(false);
+    }
   };
   
   const formatTime = (seconds: number) => {
@@ -140,18 +172,45 @@ export default function TakeTestPage() {
   };
 
   const handleAnswerChange = (questionId: number, answer: string) => {
-    setAnswers(prev => ({ ...prev, [questionId]: answer }));
+    setAnswers(prev => ({ ...prev, [questionId.toString()]: answer }));
   };
 
-  const handleSubmitTest = () => {
-    // Placeholder for submission logic
-    console.log("Test submitted with answers:", answers);
-    toast({ title: "Test Submitted!", description: "Your answers have been recorded."});
-    setTestStarted(false);
+  const handleSubmitTest = async (isAutoSubmit = false) => {
+    if (!isAutoSubmit) {
+      const unansweredQuestions = questions.filter(q => !answers[q.id.toString()]?.trim());
+      if (unansweredQuestions.length > 0) {
+        toast({ variant: "destructive", title: "Incomplete Test", description: `Please answer all ${questions.length} questions before submitting. You have ${unansweredQuestions.length} unanswered.` });
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    try {
+      const response = await submitTestAnswers({ testId: 'SAMPLE_TEST_001', answers });
+      if (response.success) {
+        toast({ title: "Test Submitted!", description: response.message });
+        setTestSubmitted(true);
+        setTestStarted(false); 
+      } else {
+        toast({ variant: 'destructive', title: "Submission Failed", description: response.message });
+      }
+    } catch (error) {
+        toast({ variant: 'destructive', title: "Submission Error", description: "Could not submit your test. Please try again or contact support."});
+        console.error("Error submitting answers:", error);
+    } finally {
+        setIsSubmitting(false);
+         // Cleanup fullscreen and focus listeners
+        if ((window as any).cleanupFocusListeners) {
+          (window as any).cleanupFocusListeners();
+          delete (window as any).cleanupFocusListeners;
+        }
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        }
+    }
   };
 
-
-  if (hasCameraPermission === null || hasMicPermission === null) {
+  if (hasCameraPermission === null || hasMicPermission === null && !testStarted) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-10rem)]">
         <Card className="w-full max-w-md p-6 text-center">
@@ -165,7 +224,21 @@ export default function TakeTestPage() {
     );
   }
   
-  const currentQ = testStarted && shuffledQuestions.length > 0 ? shuffledQuestions[currentQuestionIndex] : null;
+  const currentQ = testStarted && questions.length > 0 ? questions[currentQuestionIndex] : null;
+
+  if (testSubmitted) {
+    return (
+      <div className="flex items-center justify-center min-h-[calc(100vh-10rem)]">
+        <Card className="w-full max-w-md p-8 text-center">
+          <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+          <CardTitle className="text-2xl">Test Submitted Successfully!</CardTitle>
+          <CardDescription className="mt-2">Your answers have been recorded. You will be notified about the results later.</CardDescription>
+          <Button onClick={() => router.push('/dashboard')} className="mt-6">Back to Dashboard</Button>
+        </Card>
+      </div>
+    );
+  }
+
 
   if (!testStarted) {
     return (
@@ -185,8 +258,8 @@ export default function TakeTestPage() {
               <li>The test will be proctored using AI. Any suspicious activity will be flagged.</li>
               <li>Do not switch tabs, open other applications, or use external devices.</li>
               <li>Copying, pasting, or screen recording is strictly prohibited.</li>
-              <li>Violations will result in immediate test termination and disqualification.</li>
-              <li>You have 120 minutes to complete the test once started.</li>
+              <li>Violations will result in immediate test termination and disqualification (simulated).</li>
+              <li>You have {formatTime(timeLeft)} to complete the test once started.</li>
             </ul>
 
             {(hasCameraPermission === false || hasMicPermission === false) && (
@@ -227,9 +300,10 @@ export default function TakeTestPage() {
             <Button 
               onClick={handleStartTest} 
               className="w-full bg-accent hover:bg-accent/90 text-accent-foreground" 
-              disabled={hasCameraPermission === false || hasMicPermission === false}
+              disabled={isLoadingQuestions || hasCameraPermission === false || hasMicPermission === false}
             >
-              Start Test
+              {isLoadingQuestions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {isLoadingQuestions ? "Loading Questions..." : "Start Test"}
             </Button>
           </CardFooter>
         </Card>
@@ -239,7 +313,7 @@ export default function TakeTestPage() {
 
   // Test Interface
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] max-h-screen bg-muted/30">
+    <div ref={testContainerRef} className="flex flex-col h-[calc(100vh-4rem)] max-h-screen bg-muted/30">
       {/* Header Bar */}
       <div className="bg-primary text-primary-foreground p-3 shadow-md flex justify-between items-center">
         <div className="flex items-center gap-2">
@@ -257,8 +331,8 @@ export default function TakeTestPage() {
         {/* Questions Area (Left/Main Panel) */}
         <Card className="md:col-span-2 shadow-lg flex flex-col overflow-hidden">
           <CardHeader className="border-b">
-            <CardTitle>Question {currentQuestionIndex + 1} of {shuffledQuestions.length}</CardTitle>
-            <Progress value={((currentQuestionIndex + 1) / shuffledQuestions.length) * 100} className="mt-2 h-2" />
+            <CardTitle>Question {currentQuestionIndex + 1} of {questions.length}</CardTitle>
+            <Progress value={questions.length > 0 ? ((currentQuestionIndex + 1) / questions.length) * 100 : 0} className="mt-2 h-2" />
           </CardHeader>
           {currentQ && (
             <CardContent className="flex-grow p-6 space-y-4 overflow-y-auto">
@@ -268,7 +342,7 @@ export default function TakeTestPage() {
                   {currentQ.options.map((option, index) => (
                     <Button 
                       key={index} 
-                      variant={answers[currentQ.id] === option ? "default" : "outline"} 
+                      variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
                       className="w-full justify-start text-left h-auto py-3"
                       onClick={() => handleAnswerChange(currentQ.id, option)}
                     >
@@ -280,11 +354,25 @@ export default function TakeTestPage() {
               {currentQ.type === "text" && (
                 <textarea
                   rows={8}
-                  className="w-full p-2 border rounded-md focus:ring-primary focus:border-primary text-sm"
+                  className="w-full p-2 border rounded-md focus:ring-primary focus:border-primary text-sm bg-background"
                   placeholder="Type your answer here..."
-                  value={answers[currentQ.id] || ""}
+                  value={answers[currentQ.id.toString()] || ""}
                   onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
                 />
+              )}
+              {currentQ.type === "truefalse" && currentQ.options && (
+                 <div className="space-y-2">
+                  {currentQ.options.map((option, index) => (
+                    <Button 
+                      key={index} 
+                      variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
+                      className="w-full justify-start text-left h-auto py-3"
+                      onClick={() => handleAnswerChange(currentQ.id, option)}
+                    >
+                      {option}
+                    </Button>
+                  ))}
+                </div>
               )}
             </CardContent>
           )}
@@ -292,13 +380,14 @@ export default function TakeTestPage() {
             <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0}>
               <ChevronLeft className="mr-1 h-4 w-4"/> Previous
             </Button>
-            {currentQuestionIndex < shuffledQuestions.length - 1 ? (
-              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestions.length - 1, prev + 1))}>
+            {currentQuestionIndex < questions.length - 1 ? (
+              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(questions.length - 1, prev + 1))}>
                 Next <ChevronRight className="ml-1 h-4 w-4"/>
               </Button>
             ) : (
-              <Button onClick={handleSubmitTest} className="bg-green-600 hover:bg-green-700 text-white">
-                <Send className="mr-1 h-4 w-4"/> Submit Test
+              <Button onClick={() => handleSubmitTest(false)} className="bg-green-600 hover:bg-green-700 text-white" disabled={isSubmitting}>
+                {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4"/>}
+                {isSubmitting ? "Submitting..." : "Submit Test"}
               </Button>
             )}
           </CardFooter>
@@ -314,11 +403,11 @@ export default function TakeTestPage() {
               <video ref={videoRef} className="w-full aspect-video rounded-md bg-background border" autoPlay muted playsInline />
             </CardContent>
           </Card>
-           {showWarning && (
+           {proctoringWarning && (
             <Alert variant="destructive" className="flex-none">
               <AlertTriangle className="h-5 w-5" />
               <AlertTitle>AI Proctoring Alert!</AlertTitle>
-              <AlertDescription>{showWarning}</AlertDescription>
+              <AlertDescription>{proctoringWarning}</AlertDescription>
             </Alert>
           )}
           <Card className="shadow-md flex-grow flex flex-col">
@@ -326,8 +415,8 @@ export default function TakeTestPage() {
                 <CardTitle className="text-base flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary"/> Security Status</CardTitle>
              </CardHeader>
              <CardContent className="p-4 text-sm space-y-2 text-muted-foreground">
-                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Fullscreen Active</p>
-                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Tab Focus Locked</p>
+                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Fullscreen Active (Attempted)</p>
+                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Tab Focus Monitored</p>
                 <p className="flex items-center gap-1"><Video className="h-4 w-4 text-green-500"/> Camera Streaming</p>
                 <p className="flex items-center gap-1"><Mic className="h-4 w-4 text-green-500"/> Microphone Active</p>
              </CardContent>
@@ -337,6 +426,3 @@ export default function TakeTestPage() {
     </div>
   );
 }
-
-
-    
