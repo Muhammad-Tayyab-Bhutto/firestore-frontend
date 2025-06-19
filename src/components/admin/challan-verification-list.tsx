@@ -1,3 +1,4 @@
+
 "use client";
 import React, { useState, useMemo } from 'react';
 import {
@@ -143,7 +144,7 @@ export function ChallanVerificationList() {
                 <TableCell>
                   {challan.aiConfidence !== undefined && (
                     <div className="flex items-center gap-1 text-xs">
-                      {challan.aiFlagged && <AlertTriangle className="h-4 w-4 text-orange-500" titleAccess="AI Flagged for Review" />}
+                      {challan.aiFlagged && <AlertTriangle className="h-4 w-4 text-orange-500" title="AI Flagged for Review" />}
                       <span>Conf: {(challan.aiConfidence * 100).toFixed(0)}%</span>
                     </div>
                   )}
@@ -224,3 +225,4 @@ export function ChallanVerificationList() {
     </div>
   );
 }
+
