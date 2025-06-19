@@ -72,7 +72,7 @@ export default function TakeTestPage() {
 
     if (videoElement && currentStream && videoElement.srcObject !== currentStream) {
         videoElement.srcObject = currentStream;
-        videoElement.play().catch(error => console.warn("Video play failed:", error));
+        videoElement.play().catch(error => console.warn("Video play failed when setting srcObject:", error));
     }
   }, [testStarted, hasCameraPermission, hasMicPermission, videoRef, streamRef]);
 
@@ -88,6 +88,43 @@ export default function TakeTestPage() {
     };
   }, []);
 
+  const handleSubmitTest = useCallback(async (isAutoSubmit = false) => {
+    if (testSubmitted || isSubmitting) return; // Prevent multiple submissions
+
+    setIsSubmitting(true);
+    try {
+      const validAnswers: Record<string, string> = {};
+      for (const key in answers) {
+        if (answers[key] !== undefined && answers[key] !== null) {
+          validAnswers[key] = answers[key];
+        }
+      }
+
+      const response = await submitTestAnswers({ testId: 'SAMPLE_TEST_001', answers: validAnswers });
+      if (response.success) {
+        if (!isAutoSubmit) { // Only show generic success toast if not auto-submitted due to violation
+             toast({ title: "Test Submitted!", description: response.message });
+        }
+        setSubmissionMessage(response.message || "Test submitted successfully.");
+        setTestSubmitted(true);
+        setTestStarted(false); 
+      } else {
+        toast({ variant: 'destructive', title: "Submission Failed", description: response.message });
+        setSubmissionMessage(`Submission Failed: ${response.message}`);
+      }
+    } catch (error) {
+        toast({ variant: 'destructive', title: "Submission Error", description: "Could not submit your test. Please try again or contact support."});
+        console.error("Error submitting answers:", error);
+        setSubmissionMessage("An error occurred during submission. Please try again.");
+    } finally {
+        setIsSubmitting(false);
+         if (document.fullscreenElement) {
+            document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on submit:", err.message));
+        }
+    }
+  }, [answers, toast, testSubmitted, isSubmitting]);
+
+
   useEffect(() => {
     let timerId: NodeJS.Timeout;
     if (testStarted && timeLeft > 0 && !testSubmitted) {
@@ -99,12 +136,14 @@ export default function TakeTestPage() {
       handleSubmitTest(true); 
     }
     return () => clearInterval(timerId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [testStarted, timeLeft, testSubmitted]); 
+  }, [testStarted, timeLeft, testSubmitted, handleSubmitTest, toast]); 
   
-  // Effect for test lockdown features
   useEffect(() => {
     if (!testStarted || testSubmitted) {
+      // Ensure fullscreen is exited if test is no longer active
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen:", err.message));
+      }
       return;
     }
 
@@ -112,9 +151,9 @@ export default function TakeTestPage() {
       const elem = document.documentElement;
       if (elem.requestFullscreen) {
         elem.requestFullscreen().catch(err => console.warn("Fullscreen request failed:", err.message));
-      } else if ((elem as any).webkitRequestFullscreen) { /* Safari */
+      } else if ((elem as any).webkitRequestFullscreen) { 
         (elem as any).webkitRequestFullscreen();
-      } else if ((elem as any).msRequestFullscreen) { /* IE11 */
+      } else if ((elem as any).msRequestFullscreen) { 
         (elem as any).msRequestFullscreen();
       }
     };
@@ -122,43 +161,44 @@ export default function TakeTestPage() {
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
-      e.returnValue = 'Are you sure you want to leave? Your test progress might be lost.';
+      e.returnValue = 'Are you sure you want to leave? Your test progress might be lost and the test will be submitted.';
+      // Consider auto-submitting here too, but be cautious as it can be triggered by legitimate refreshes if not handled carefully.
+      // For now, the warning is the primary deterrent.
     };
 
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        setProctoringWarning("AI Alert: You have switched tabs or windows. This is being monitored.");
-      } else {
-        setProctoringWarning(null);
+      if (document.hidden && testStarted && !testSubmitted) {
+        setProctoringWarning("AI Alert: Tab switched or window minimized. Test submitted automatically.");
+        toast({ variant: "destructive", title: "Proctoring Violation Detected", description: "Test submitted due to tab switch or window minimization." });
+        handleSubmitTest(true); 
       }
     };
     
     const handleWindowBlur = () => {
-      // Check if an alert or confirm dialog is active, as these can trigger blur
-      // This is a heuristic and might not cover all cases.
-      if (document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML')) {
-        // No specific element is focused, could be a system dialog or tab switch
-         setProctoringWarning("AI Alert: Test window lost focus. Please return to the test immediately.");
-      } else {
-        // An element within the page is focused, likely an internal dialog (e.g., toast)
-        console.log("Window blurred, but an element has focus:", document.activeElement);
+      if (testStarted && !testSubmitted && document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML')) {
+         setProctoringWarning("AI Alert: Test window lost focus. Test submitted automatically.");
+         toast({ variant: "destructive", title: "Proctoring Violation Detected", description: "Test submitted due to window losing focus." });
+         handleSubmitTest(true);
       }
     };
-
 
     const disableContextMenu = (e: MouseEvent) => e.preventDefault();
 
     const disableShortcuts = (e: KeyboardEvent) => {
-       const prohibitedCtrl = ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S', 'c', 'C', 'x', 'X', 'v', 'V', 'u', 'U', 'j', 'J'];
-       const prohibitedKeys = ['F5', 'F11', 'F12', 'PrintScreen'];
+       const prohibitedCtrlShift = ['i', 'I', 'j', 'J', 'c', 'C']; // Dev tools, inspect
+       const prohibitedCtrl = ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S', 'u', 'U', 'w', 'W', 'x', 'X', 'v', 'V']; // reload, new tab/window, print, save, view source, close tab, cut, copy, paste
+       const prohibitedKeys = ['F5', 'F11', 'F12', 'PrintScreen', 'ContextMenu']; // reload, fullscreen toggle, dev tools, print screen, context menu key
+       const isProhibitedCtrlShift = e.ctrlKey && e.shiftKey && prohibitedCtrlShift.includes(e.key);
        const isProhibitedCtrl = e.ctrlKey && prohibitedCtrl.includes(e.key);
        const isProhibitedMeta = e.metaKey && prohibitedCtrl.includes(e.key); // Cmd key for Mac
-       const isProhibitedKey = prohibitedKeys.includes(e.key);
+       const isProhibitedKey = prohibitedKeys.includes(e.key) || (e.altKey && e.key === 'Tab');
 
-      if (isProhibitedCtrl || isProhibitedMeta || isProhibitedKey) {
+
+      if (isProhibitedCtrlShift || isProhibitedCtrl || isProhibitedMeta || isProhibitedKey) {
         e.preventDefault();
-        setProctoringWarning("AI Alert: Prohibited shortcut/action used. This action is being monitored.");
-        setTimeout(() => setProctoringWarning(null), 3000);
+        setProctoringWarning("AI Alert: Prohibited shortcut/action detected. Test submitted automatically.");
+        toast({ variant: "destructive", title: "Proctoring Violation Detected", description: "Test submitted due to use of prohibited shortcut or action." });
+        handleSubmitTest(true);
       }
     };
     
@@ -174,11 +214,11 @@ export default function TakeTestPage() {
       window.removeEventListener('blur', handleWindowBlur);
       document.removeEventListener('contextmenu', disableContextMenu);
       document.removeEventListener('keydown', disableShortcuts);
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen:", err.message));
+      if (document.fullscreenElement) { // Ensure exiting fullscreen when component unmounts or test ends
+        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on cleanup:", err.message));
       }
     };
-  }, [testStarted, testSubmitted]);
+  }, [testStarted, testSubmitted, handleSubmitTest, toast]);
 
 
   const handleStartTest = async () => {
@@ -200,7 +240,6 @@ export default function TakeTestPage() {
         return;
     }
 
-
     setIsLoadingQuestions(true);
     try {
       const { questions: fetchedQuestions } = await getTestQuestions({ testId: 'SAMPLE_TEST_001' }); 
@@ -220,9 +259,6 @@ export default function TakeTestPage() {
       setSubmissionMessage(null);
       setProctoringWarning(null);
       
-      setTimeout(() => { if (testStarted && !testSubmitted) setProctoringWarning("AI Alert: Please keep your face clearly visible."); }, 30000);
-      setTimeout(() => { if (testStarted && !testSubmitted) setProctoringWarning(null); }, 40000);
-
     } catch (error) {
       toast({ variant: 'destructive', title: "Failed to Load Test", description: "Could not fetch test questions. Please try again."});
       console.error("Error fetching questions:", error);
@@ -242,44 +278,6 @@ export default function TakeTestPage() {
   const handleAnswerChange = (questionId: number, answer: string) => {
     setAnswers(prev => ({ ...prev, [questionId.toString()]: answer }));
   };
-
-  const handleSubmitTest = useCallback(async (isAutoSubmit = false) => {
-    // Removed: Check for unanswered questions, allowing blank submissions.
-    // if (!isAutoSubmit && shuffledQuestions.length > 0) {
-    //   const unansweredQuestions = shuffledQuestions.filter(q => !answers[q.id.toString()]?.trim());
-    //   if (unansweredQuestions.length > 0) {
-    //     toast({ variant: "destructive", title: "Incomplete Test", description: `Please answer all ${shuffledQuestions.length} questions before submitting. You have ${unansweredQuestions.length} unanswered.` });
-    //     return;
-    //   }
-    // }
-
-    setIsSubmitting(true);
-    try {
-      const validAnswers: Record<string, string> = {};
-      for (const key in answers) {
-        if (answers[key] !== undefined && answers[key] !== null) {
-          validAnswers[key] = answers[key];
-        }
-      }
-
-      const response = await submitTestAnswers({ testId: 'SAMPLE_TEST_001', answers: validAnswers });
-      if (response.success) {
-        toast({ title: "Test Submitted!", description: response.message });
-        setSubmissionMessage(response.message);
-        setTestSubmitted(true);
-        setTestStarted(false); 
-      } else {
-        toast({ variant: 'destructive', title: "Submission Failed", description: response.message });
-        setSubmissionMessage(`Submission Failed: ${response.message}`);
-      }
-    } catch (error) {
-        toast({ variant: 'destructive', title: "Submission Error", description: "Could not submit your test. Please try again or contact support."});
-        console.error("Error submitting answers:", error);
-        setSubmissionMessage("An error occurred during submission. Please try again.");
-    } finally {
-        setIsSubmitting(false);
-    }
-  }, [answers, toast, shuffledQuestions]); // shuffledQuestions still needed if we re-add the check later
   
   if ((hasCameraPermission === null || hasMicPermission === null) && !testStarted && !streamRef.current) {
     return (
@@ -327,11 +325,10 @@ export default function TakeTestPage() {
             <ul className="list-disc list-inside space-y-1 text-muted-foreground bg-muted/50 p-4 rounded-md">
               <li>Ensure you are in a quiet, well-lit room, alone.</li>
               <li>Your webcam and microphone must remain on throughout the test.</li>
-              <li>The test will be proctored using AI. Any suspicious activity will be flagged.</li>
+              <li>The test will be proctored using AI. Any suspicious activity (tab switching, losing focus, prohibited shortcuts) will result in automatic test submission.</li>
               <li>Do not switch tabs, open other applications, or use external devices.</li>
               <li>Copying, pasting, or screen recording is strictly prohibited.</li>
-              <li>Certain browser actions (e.g., refresh, new tab, developer tools) are restricted.</li>
-              <li>Violations will result in immediate test termination and disqualification (simulated).</li>
+              <li>Certain browser actions (e.g., refresh, new tab, developer tools) are restricted and will lead to test termination.</li>
               <li>You have {formatTime(timeLeft)} to complete the test once started.</li>
             </ul>
 
@@ -385,7 +382,6 @@ export default function TakeTestPage() {
     );
   }
 
-  // Test Interface
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] max-h-screen bg-background">
       <header className="bg-primary text-primary-foreground p-3 shadow-md flex justify-between items-center shrink-0">
@@ -400,7 +396,6 @@ export default function TakeTestPage() {
       </header>
 
       <div className="flex-grow grid grid-cols-12 gap-4 p-4 overflow-hidden">
-        {/* Question Navigation Panel */}
         <Card className="col-span-12 md:col-span-2 shadow-lg flex flex-col">
           <CardHeader className="p-3 border-b">
             <CardTitle className="text-base flex items-center gap-2"><ListChecks className="h-5 w-5 text-primary"/> Questions</CardTitle>
@@ -414,6 +409,7 @@ export default function TakeTestPage() {
                   size="sm"
                   className={`w-full justify-start text-left ${answers[q.id.toString()]?.trim() ? 'font-semibold' : ''} ${currentQuestionIndex === index ? '' : (answers[q.id.toString()]?.trim() ? 'border-green-500' : 'border-muted') }`}
                   onClick={() => setCurrentQuestionIndex(index)}
+                  disabled={testSubmitted}
                 >
                   Q {index + 1} {answers[q.id.toString()]?.trim() ? <CheckCircle className="ml-auto h-4 w-4 text-green-600" /> : null}
                 </Button>
@@ -422,7 +418,6 @@ export default function TakeTestPage() {
           </ScrollArea>
         </Card>
         
-        {/* Main Question Area */}
         <Card className="col-span-12 md:col-span-7 shadow-lg flex flex-col overflow-hidden">
           <CardHeader className="border-b">
             <CardTitle>Question {currentQuestionIndex + 1} of {shuffledQuestions.length}</CardTitle>
@@ -440,6 +435,7 @@ export default function TakeTestPage() {
                         variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
                         className="w-full justify-start text-left h-auto py-3 whitespace-normal"
                         onClick={() => handleAnswerChange(currentQ.id, option)}
+                        disabled={testSubmitted}
                       >
                         {option}
                       </Button>
@@ -457,6 +453,7 @@ export default function TakeTestPage() {
                       placeholder="Type your answer here..."
                       value={answers[currentQ.id.toString()] || ""}
                       onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
+                      disabled={testSubmitted}
                     />
                   </>
                 )}
@@ -468,6 +465,7 @@ export default function TakeTestPage() {
                         variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
                         className="w-full justify-start text-left h-auto py-3"
                         onClick={() => handleAnswerChange(currentQ.id, option)}
+                        disabled={testSubmitted}
                       >
                         {option}
                       </Button>
@@ -478,15 +476,15 @@ export default function TakeTestPage() {
             </ScrollArea>
           )}
           <CardFooter className="border-t p-3 flex justify-between shrink-0">
-            <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0}>
+            <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0 || testSubmitted}>
               <ChevronLeft className="mr-1 h-4 w-4"/> Previous
             </Button>
             {currentQuestionIndex < shuffledQuestions.length - 1 ? (
-              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestions.length - 1, prev + 1))}>
+              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestions.length - 1, prev + 1))} disabled={testSubmitted}>
                 Next <ChevronRight className="ml-1 h-4 w-4"/>
               </Button>
             ) : (
-              <Button onClick={() => handleSubmitTest(false)} className="bg-green-600 hover:bg-green-700 text-white" disabled={isSubmitting}>
+              <Button onClick={() => handleSubmitTest(false)} className="bg-green-600 hover:bg-green-700 text-white" disabled={isSubmitting || testSubmitted}>
                 {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4"/>}
                 {isSubmitting ? "Submitting..." : "Submit Test"}
               </Button>
@@ -494,7 +492,6 @@ export default function TakeTestPage() {
           </CardFooter>
         </Card>
 
-        {/* Proctoring/Security Info Panel */}
         <div className="col-span-12 md:col-span-3 space-y-4 flex flex-col">
           <Card className="shadow-md flex-none">
             <CardHeader className="p-3 pb-1">
@@ -531,4 +528,3 @@ export default function TakeTestPage() {
     </div>
   );
 }
-
