@@ -22,13 +22,11 @@ export default function TakeTestPage() {
   const [proctoringWarning, setProctoringWarning] = useState<string | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(120 * 60); // 120 minutes in seconds
-  const [questions, setQuestions] = useState<TestQuestion[]>([]);
   const [shuffledQuestions, setShuffledQuestions] = useState<TestQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const testContainerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const router = useRouter();
 
@@ -61,34 +59,23 @@ export default function TakeTestPage() {
     }
   }, [toast]);
 
-  // Effect to request permissions initially before test starts
   useEffect(() => {
-    if (!testStarted && !streamRef.current && (hasCameraPermission === null || hasMicPermission === null)) {
+    if (!testStarted && (hasCameraPermission === null || hasMicPermission === null) && !streamRef.current) {
       requestPermissions();
     }
   }, [testStarted, hasCameraPermission, hasMicPermission, requestPermissions]);
 
-  // Effect to attach stream to video element when it's available or test starts/stops
   useEffect(() => {
     const videoElement = videoRef.current;
     const currentStream = streamRef.current;
 
-    if (videoElement && currentStream) {
-      if (videoElement.srcObject !== currentStream) {
+    if (videoElement && currentStream && videoElement.srcObject !== currentStream) {
         videoElement.srcObject = currentStream;
         videoElement.play().catch(error => console.warn("Video play failed:", error));
-      }
     }
-    // Ensure video preview is active if permissions are granted and test hasn't started
-    else if (videoElement && !testStarted && hasCameraPermission && currentStream) {
-       if (videoElement.srcObject !== currentStream) {
-        videoElement.srcObject = currentStream;
-        videoElement.play().catch(error => console.warn("Video play failed on pre-test:", error));
-      }
-    }
-  }, [testStarted, hasCameraPermission, videoRef, streamRef]); // videoRef and streamRef themselves are stable, .current isn't a dep
+  }, [testStarted, hasCameraPermission, hasMicPermission, videoRef, streamRef]);
 
-  // Effect for cleanup on component unmount
+
   useEffect(() => {
     return () => {
       if (streamRef.current) {
@@ -115,41 +102,83 @@ export default function TakeTestPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testStarted, timeLeft, testSubmitted]); 
   
-  const handleFullscreenAndFocus = useCallback(() => {
-    let visibilityHandler: () => void;
-    let blurHandler: () => void;
-
-    if (testContainerRef.current && !document.fullscreenElement) {
-      testContainerRef.current.requestFullscreen().catch(err => {
-        toast({variant: 'destructive', title: "Fullscreen Recommended", description: "Please enable fullscreen mode for the best experience."})
-        console.warn("Cannot enter fullscreen", err);
-      });
+  // Effect for test lockdown features
+  useEffect(() => {
+    if (!testStarted || testSubmitted) {
+      return;
     }
 
-    visibilityHandler = () => {
-      if (document.hidden && testStarted && !testSubmitted) {
-        setProctoringWarning("AI Alert: You have switched tabs/windows. This is being monitored.");
+    const enterFullScreen = () => {
+      const elem = document.documentElement;
+      if (elem.requestFullscreen) {
+        elem.requestFullscreen().catch(err => console.warn("Fullscreen request failed:", err));
+      } else if ((elem as any).webkitRequestFullscreen) { /* Safari */
+        (elem as any).webkitRequestFullscreen();
+      } else if ((elem as any).msRequestFullscreen) { /* IE11 */
+        (elem as any).msRequestFullscreen();
+      }
+    };
+    enterFullScreen(); // Attempt fullscreen when test starts
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'Are you sure you want to leave? Your test progress might be lost.'; // Standard way to trigger browser prompt
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setProctoringWarning("AI Alert: You have switched tabs or windows. This is being monitored.");
       } else {
         setProctoringWarning(null);
       }
     };
-    blurHandler = () => {
-       if (testStarted && !testSubmitted) {
-        setProctoringWarning("AI Alert: Test window lost focus. Please return to the test immediately.");
-       }
-    }
 
-    document.addEventListener('visibilitychange', visibilityHandler);
-    window.addEventListener('blur', blurHandler);
+    const handleBlur = () => {
+      setProctoringWarning("AI Alert: Test window lost focus. Please return to the test immediately.");
+    };
+
+    const disableContextMenu = (e: MouseEvent) => e.preventDefault();
+
+    const disableShortcuts = (e: KeyboardEvent) => {
+      if (
+        (e.ctrlKey && ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S', 'c', 'C', 'x', 'X', 'v', 'V'].includes(e.key)) || 
+        e.key === 'F5' || e.key === 'F11' || e.key === 'F12' ||
+        (e.metaKey && ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S'].includes(e.key)) // Cmd key for Mac
+      ) {
+        e.preventDefault();
+        setProctoringWarning("AI Alert: Prohibited shortcut used. This action is being monitored.");
+        setTimeout(() => setProctoringWarning(null), 3000);
+      }
+    };
+
+    const handleRouteChange = (url: string) => {
+      if (testStarted && !testSubmitted) {
+        if (!window.confirm('You are attempting to leave the test. Your progress may be lost. Are you sure?')) {
+          router.events.emit('routeChangeError');
+          throw 'Route change aborted by user.';
+        }
+      }
+    };
     
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('contextmenu', disableContextMenu);
+    document.addEventListener('keydown', disableShortcuts);
+    router.events.on('routeChangeStart', handleRouteChange);
+
     return () => {
-      document.removeEventListener('visibilitychange', visibilityHandler);
-      window.removeEventListener('blur', blurHandler);
-      if (document.fullscreenElement && testContainerRef.current && document.fullscreenElement === testContainerRef.current) {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('contextmenu', disableContextMenu);
+      document.removeEventListener('keydown', disableShortcuts);
+      router.events.off('routeChangeStart', handleRouteChange);
+      if (document.fullscreenElement) {
         document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen:", err));
       }
     };
-  }, [toast, testStarted, testSubmitted]);
+  }, [testStarted, testSubmitted, router, router.events]);
 
 
   const handleStartTest = async () => {
@@ -159,10 +188,10 @@ export default function TakeTestPage() {
         title: 'Permissions Required',
         description: 'Camera and microphone access are mandatory to start the test. Please enable them.',
       });
-      requestPermissions(); // Re-attempt to get permissions
+      requestPermissions(); 
       return;
     }
-    if (!streamRef.current && hasCameraPermission === true) { // Check streamRef instead of videoRef.srcObject
+    if (!streamRef.current && hasCameraPermission === true) { 
         toast({
             variant: 'destructive',
             title: 'Camera Stream Error',
@@ -180,7 +209,6 @@ export default function TakeTestPage() {
         const j = Math.floor(Math.random() * (i + 1));
         [array[i], array[j]] = [array[j], array[i]];
       }
-      setQuestions(fetchedQuestions); 
       setShuffledQuestions(array);   
       
       setCurrentQuestionIndex(0);
@@ -190,9 +218,7 @@ export default function TakeTestPage() {
       setTestSubmitted(false);
       setProctoringWarning(null);
       
-      const cleanupFocusListeners = handleFullscreenAndFocus();
-      (window as any).cleanupFocusListeners = cleanupFocusListeners;
-
+      // Simulate AI warnings after a delay
       setTimeout(() => { if (testStarted && !testSubmitted) setProctoringWarning("AI Alert: Please keep your face clearly visible."); }, 30000);
       setTimeout(() => { if (testStarted && !testSubmitted) setProctoringWarning(null); }, 40000);
 
@@ -227,7 +253,6 @@ export default function TakeTestPage() {
 
     setIsSubmitting(true);
     try {
-      // Filter out any potential undefined answers before submission
       const validAnswers: Record<string, string> = {};
       for (const key in answers) {
         if (answers[key] !== undefined && answers[key] !== null) {
@@ -248,13 +273,7 @@ export default function TakeTestPage() {
         console.error("Error submitting answers:", error);
     } finally {
         setIsSubmitting(false);
-        if ((window as any).cleanupFocusListeners) {
-          (window as any).cleanupFocusListeners();
-          delete (window as any).cleanupFocusListeners;
-        }
-        if (document.fullscreenElement && testContainerRef.current && document.fullscreenElement === testContainerRef.current) {
-          document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on submit:", err));
-        }
+        // Fullscreen exit and listener cleanup is now handled in the main lockdown useEffect
     }
   }, [answers, toast, shuffledQuestions]); 
   
@@ -305,6 +324,7 @@ export default function TakeTestPage() {
               <li>The test will be proctored using AI. Any suspicious activity will be flagged.</li>
               <li>Do not switch tabs, open other applications, or use external devices.</li>
               <li>Copying, pasting, or screen recording is strictly prohibited.</li>
+              <li>Certain browser actions (e.g., refresh, new tab, developer tools) are restricted.</li>
               <li>Violations will result in immediate test termination and disqualification (simulated).</li>
               <li>You have {formatTime(timeLeft)} to complete the test once started.</li>
             </ul>
@@ -361,7 +381,7 @@ export default function TakeTestPage() {
 
   // Test Interface
   return (
-    <div ref={testContainerRef} className="flex flex-col h-[calc(100vh-4rem)] max-h-screen bg-muted/30">
+    <div className="flex flex-col h-[calc(100vh-4rem)] max-h-screen bg-muted/30">
       <div className="bg-primary text-primary-foreground p-3 shadow-md flex justify-between items-center">
         <div className="flex items-center gap-2">
           <BookOpen className="h-6 w-6" />
@@ -466,6 +486,8 @@ export default function TakeTestPage() {
              <CardContent className="p-4 text-sm space-y-2 text-muted-foreground">
                 <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Fullscreen Active (Attempted)</p>
                 <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Tab Focus Monitored</p>
+                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Navigation Restricted (Warnings)</p>
+                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Shortcuts/Context Menu Restricted</p>
                 <p className="flex items-center gap-1"><Video className="h-4 w-4 text-green-500"/> Camera Streaming</p>
                 <p className="flex items-center gap-1"><Mic className="h-4 w-4 text-green-500"/> Microphone Active</p>
              </CardContent>
@@ -475,5 +497,3 @@ export default function TakeTestPage() {
     </div>
   );
 }
-
-    
