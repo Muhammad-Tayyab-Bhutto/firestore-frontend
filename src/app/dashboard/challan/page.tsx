@@ -4,11 +4,6 @@ import { ChallanUploadForm } from "@/components/dashboard/challan-upload-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Download, FileSpreadsheet } from "lucide-react";
-import { Metadata } from "next";
-
-export const metadata: Metadata = {
-  title: "Fee Challan - AdmitPro",
-};
 
 export default function FeeChallanPage() {
   const handleDownloadChallan = () => {
