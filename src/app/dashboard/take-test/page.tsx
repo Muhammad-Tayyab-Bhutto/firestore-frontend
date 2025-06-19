@@ -6,17 +6,18 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
-import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send, CheckCircle, Loader2 } from 'lucide-react';
+import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send, CheckCircle, Loader2, ListChecks, Eye, EyeOff } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { getTestQuestions, submitTestAnswers } from '@/ai/flows/test-session-flow';
 import type { TestQuestion } from '@/ai/flows/test-session-types';
-// Removed: import { useRouter } from 'next/navigation'; // No longer needed for router.events
 
 export default function TakeTestPage() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
   const [testStarted, setTestStarted] = useState(false);
   const [testSubmitted, setTestSubmitted] = useState(false);
+  const [submissionMessage, setSubmissionMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
   const [proctoringWarning, setProctoringWarning] = useState<string | null>(null);
@@ -28,7 +29,6 @@ export default function TakeTestPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
-  // Removed: const router = useRouter(); // No longer needed for router.events
 
   const requestPermissions = useCallback(async () => {
     try {
@@ -38,6 +38,7 @@ export default function TakeTestPage() {
       setHasMicPermission(true);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        videoRef.current.play().catch(e => console.warn("Video play failed on initial permission grant:", e));
       }
     } catch (error) {
       console.error('Error accessing media devices:', error);
@@ -74,7 +75,6 @@ export default function TakeTestPage() {
         videoElement.play().catch(error => console.warn("Video play failed:", error));
     }
   }, [testStarted, hasCameraPermission, hasMicPermission, videoRef, streamRef]);
-
 
   useEffect(() => {
     return () => {
@@ -132,35 +132,46 @@ export default function TakeTestPage() {
         setProctoringWarning(null);
       }
     };
-
-    const handleBlur = () => {
-      setProctoringWarning("AI Alert: Test window lost focus. Please return to the test immediately.");
+    
+    const handleWindowBlur = () => {
+      // Check if an alert or confirm dialog is active, as these can trigger blur
+      // This is a heuristic and might not cover all cases.
+      if (document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML')) {
+        // No specific element is focused, could be a system dialog or tab switch
+         setProctoringWarning("AI Alert: Test window lost focus. Please return to the test immediately.");
+      } else {
+        // An element within the page is focused, likely an internal dialog (e.g., toast)
+        console.log("Window blurred, but an element has focus:", document.activeElement);
+      }
     };
+
 
     const disableContextMenu = (e: MouseEvent) => e.preventDefault();
 
     const disableShortcuts = (e: KeyboardEvent) => {
-      if (
-        (e.ctrlKey && ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S', 'c', 'C', 'x', 'X', 'v', 'V'].includes(e.key)) || 
-        e.key === 'F5' || e.key === 'F11' || e.key === 'F12' ||
-        (e.metaKey && ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S'].includes(e.key)) // Cmd key for Mac
-      ) {
+       const prohibitedCtrl = ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S', 'c', 'C', 'x', 'X', 'v', 'V', 'u', 'U', 'j', 'J'];
+       const prohibitedKeys = ['F5', 'F11', 'F12', 'PrintScreen'];
+       const isProhibitedCtrl = e.ctrlKey && prohibitedCtrl.includes(e.key);
+       const isProhibitedMeta = e.metaKey && prohibitedCtrl.includes(e.key); // Cmd key for Mac
+       const isProhibitedKey = prohibitedKeys.includes(e.key);
+
+      if (isProhibitedCtrl || isProhibitedMeta || isProhibitedKey) {
         e.preventDefault();
-        setProctoringWarning("AI Alert: Prohibited shortcut used. This action is being monitored.");
+        setProctoringWarning("AI Alert: Prohibited shortcut/action used. This action is being monitored.");
         setTimeout(() => setProctoringWarning(null), 3000);
       }
     };
     
     window.addEventListener('beforeunload', handleBeforeUnload);
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
+    window.addEventListener('blur', handleWindowBlur);
     document.addEventListener('contextmenu', disableContextMenu);
     document.addEventListener('keydown', disableShortcuts);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('blur', handleWindowBlur);
       document.removeEventListener('contextmenu', disableContextMenu);
       document.removeEventListener('keydown', disableShortcuts);
       if (document.fullscreenElement) {
@@ -180,7 +191,7 @@ export default function TakeTestPage() {
       requestPermissions(); 
       return;
     }
-    if (!streamRef.current && hasCameraPermission === true) { 
+     if (!videoRef.current?.srcObject && hasCameraPermission === true) { 
         toast({
             variant: 'destructive',
             title: 'Camera Stream Error',
@@ -188,6 +199,7 @@ export default function TakeTestPage() {
         });
         return;
     }
+
 
     setIsLoadingQuestions(true);
     try {
@@ -205,6 +217,7 @@ export default function TakeTestPage() {
       setTimeLeft(120 * 60); 
       setTestStarted(true);
       setTestSubmitted(false);
+      setSubmissionMessage(null);
       setProctoringWarning(null);
       
       setTimeout(() => { if (testStarted && !testSubmitted) setProctoringWarning("AI Alert: Please keep your face clearly visible."); }, 30000);
@@ -231,13 +244,14 @@ export default function TakeTestPage() {
   };
 
   const handleSubmitTest = useCallback(async (isAutoSubmit = false) => {
-    if (!isAutoSubmit && shuffledQuestions.length > 0) {
-      const unansweredQuestions = shuffledQuestions.filter(q => !answers[q.id.toString()]?.trim());
-      if (unansweredQuestions.length > 0) {
-        toast({ variant: "destructive", title: "Incomplete Test", description: `Please answer all ${shuffledQuestions.length} questions before submitting. You have ${unansweredQuestions.length} unanswered.` });
-        return;
-      }
-    }
+    // Removed: Check for unanswered questions, allowing blank submissions.
+    // if (!isAutoSubmit && shuffledQuestions.length > 0) {
+    //   const unansweredQuestions = shuffledQuestions.filter(q => !answers[q.id.toString()]?.trim());
+    //   if (unansweredQuestions.length > 0) {
+    //     toast({ variant: "destructive", title: "Incomplete Test", description: `Please answer all ${shuffledQuestions.length} questions before submitting. You have ${unansweredQuestions.length} unanswered.` });
+    //     return;
+    //   }
+    // }
 
     setIsSubmitting(true);
     try {
@@ -251,18 +265,21 @@ export default function TakeTestPage() {
       const response = await submitTestAnswers({ testId: 'SAMPLE_TEST_001', answers: validAnswers });
       if (response.success) {
         toast({ title: "Test Submitted!", description: response.message });
+        setSubmissionMessage(response.message);
         setTestSubmitted(true);
         setTestStarted(false); 
       } else {
         toast({ variant: 'destructive', title: "Submission Failed", description: response.message });
+        setSubmissionMessage(`Submission Failed: ${response.message}`);
       }
     } catch (error) {
         toast({ variant: 'destructive', title: "Submission Error", description: "Could not submit your test. Please try again or contact support."});
         console.error("Error submitting answers:", error);
+        setSubmissionMessage("An error occurred during submission. Please try again.");
     } finally {
         setIsSubmitting(false);
     }
-  }, [answers, toast, shuffledQuestions]); 
+  }, [answers, toast, shuffledQuestions]); // shuffledQuestions still needed if we re-add the check later
   
   if ((hasCameraPermission === null || hasMicPermission === null) && !testStarted && !streamRef.current) {
     return (
@@ -285,9 +302,10 @@ export default function TakeTestPage() {
       <div className="flex items-center justify-center min-h-[calc(100vh-10rem)]">
         <Card className="w-full max-w-md p-8 text-center">
           <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
-          <CardTitle className="text-2xl">Test Submitted Successfully!</CardTitle>
-          <CardDescription className="mt-2">Your answers have been recorded. You will be notified about the results later.</CardDescription>
-          {/* Removed router.push for now */}
+          <CardTitle className="text-2xl">Test Submitted!</CardTitle>
+          <CardDescription className="mt-2">
+            {submissionMessage || "Your answers have been recorded. You will be notified about the results later."}
+          </CardDescription>
           <Button onClick={() => window.location.href = '/dashboard'} className="mt-6">Back to Dashboard</Button>
         </Card>
       </div>
@@ -369,8 +387,8 @@ export default function TakeTestPage() {
 
   // Test Interface
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] max-h-screen bg-muted/30">
-      <div className="bg-primary text-primary-foreground p-3 shadow-md flex justify-between items-center">
+    <div className="flex flex-col h-[calc(100vh-4rem)] max-h-screen bg-background">
+      <header className="bg-primary text-primary-foreground p-3 shadow-md flex justify-between items-center shrink-0">
         <div className="flex items-center gap-2">
           <BookOpen className="h-6 w-6" />
           <h1 className="text-xl font-semibold">Online Screening Test</h1>
@@ -379,62 +397,87 @@ export default function TakeTestPage() {
           <Timer className="h-5 w-5" />
           <span className="font-mono text-lg">{formatTime(timeLeft)}</span>
         </div>
-      </div>
+      </header>
 
-      <div className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-4 p-4 overflow-hidden">
-        <Card className="md:col-span-2 shadow-lg flex flex-col overflow-hidden">
+      <div className="flex-grow grid grid-cols-12 gap-4 p-4 overflow-hidden">
+        {/* Question Navigation Panel */}
+        <Card className="col-span-12 md:col-span-2 shadow-lg flex flex-col">
+          <CardHeader className="p-3 border-b">
+            <CardTitle className="text-base flex items-center gap-2"><ListChecks className="h-5 w-5 text-primary"/> Questions</CardTitle>
+          </CardHeader>
+          <ScrollArea className="flex-grow">
+            <CardContent className="p-2 space-y-1">
+              {shuffledQuestions.map((q, index) => (
+                <Button
+                  key={q.id}
+                  variant={currentQuestionIndex === index ? "default" : "outline"}
+                  size="sm"
+                  className={`w-full justify-start text-left ${answers[q.id.toString()]?.trim() ? 'font-semibold' : ''} ${currentQuestionIndex === index ? '' : (answers[q.id.toString()]?.trim() ? 'border-green-500' : 'border-muted') }`}
+                  onClick={() => setCurrentQuestionIndex(index)}
+                >
+                  Q {index + 1} {answers[q.id.toString()]?.trim() ? <CheckCircle className="ml-auto h-4 w-4 text-green-600" /> : null}
+                </Button>
+              ))}
+            </CardContent>
+          </ScrollArea>
+        </Card>
+        
+        {/* Main Question Area */}
+        <Card className="col-span-12 md:col-span-7 shadow-lg flex flex-col overflow-hidden">
           <CardHeader className="border-b">
             <CardTitle>Question {currentQuestionIndex + 1} of {shuffledQuestions.length}</CardTitle>
             <Progress value={shuffledQuestions.length > 0 ? ((currentQuestionIndex + 1) / shuffledQuestions.length) * 100 : 0} className="mt-2 h-2" />
           </CardHeader>
           {currentQ && (
-            <CardContent className="flex-grow p-6 space-y-4 overflow-y-auto">
-              <p className="text-lg whitespace-pre-wrap">{currentQ.text}</p>
-              {currentQ.type === "mcq" && currentQ.options && (
-                <div className="space-y-2">
-                  {currentQ.options.map((option, index) => (
-                    <Button 
-                      key={index} 
-                      variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
-                      className="w-full justify-start text-left h-auto py-3 whitespace-normal"
-                      onClick={() => handleAnswerChange(currentQ.id, option)}
-                    >
-                      {option}
-                    </Button>
-                  ))}
-                </div>
-              )}
-              {currentQ.type === "text" && (
-                <>
-                  <p className="text-sm text-muted-foreground">
-                    Please provide your answer in the text area below. For complex formatting (e.g., mathematical equations, code blocks), please use standard conventions as rich text input is not currently supported.
-                  </p>
-                  <textarea
-                    rows={8}
-                    className="w-full p-2 border rounded-md focus:ring-primary focus:border-primary text-sm bg-background"
-                    placeholder="Type your answer here..."
-                    value={answers[currentQ.id.toString()] || ""}
-                    onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
-                  />
-                </>
-              )}
-              {currentQ.type === "truefalse" && currentQ.options && (
-                 <div className="space-y-2">
-                  {currentQ.options.map((option, index) => (
-                    <Button 
-                      key={index} 
-                      variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
-                      className="w-full justify-start text-left h-auto py-3"
-                      onClick={() => handleAnswerChange(currentQ.id, option)}
-                    >
-                      {option}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </CardContent>
+            <ScrollArea className="flex-grow">
+              <CardContent className="p-6 space-y-4">
+                <p className="text-lg whitespace-pre-wrap">{currentQ.text}</p>
+                {currentQ.type === "mcq" && currentQ.options && (
+                  <div className="space-y-2">
+                    {currentQ.options.map((option, index) => (
+                      <Button 
+                        key={index} 
+                        variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
+                        className="w-full justify-start text-left h-auto py-3 whitespace-normal"
+                        onClick={() => handleAnswerChange(currentQ.id, option)}
+                      >
+                        {option}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+                {currentQ.type === "text" && (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      Please provide your answer in the text area below. For complex formatting (e.g., mathematical equations, code blocks), please use standard conventions as rich text input is not currently supported.
+                    </p>
+                    <textarea
+                      rows={8}
+                      className="w-full p-2 border rounded-md focus:ring-primary focus:border-primary text-sm bg-background"
+                      placeholder="Type your answer here..."
+                      value={answers[currentQ.id.toString()] || ""}
+                      onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
+                    />
+                  </>
+                )}
+                {currentQ.type === "truefalse" && currentQ.options && (
+                  <div className="space-y-2">
+                    {currentQ.options.map((option, index) => (
+                      <Button 
+                        key={index} 
+                        variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
+                        className="w-full justify-start text-left h-auto py-3"
+                        onClick={() => handleAnswerChange(currentQ.id, option)}
+                      >
+                        {option}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </ScrollArea>
           )}
-          <CardFooter className="border-t p-3 flex justify-between">
+          <CardFooter className="border-t p-3 flex justify-between shrink-0">
             <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0}>
               <ChevronLeft className="mr-1 h-4 w-4"/> Previous
             </Button>
@@ -451,9 +494,10 @@ export default function TakeTestPage() {
           </CardFooter>
         </Card>
 
-        <div className="space-y-4 flex flex-col">
+        {/* Proctoring/Security Info Panel */}
+        <div className="col-span-12 md:col-span-3 space-y-4 flex flex-col">
           <Card className="shadow-md flex-none">
-            <CardHeader className="pb-2">
+            <CardHeader className="p-3 pb-1">
               <CardTitle className="text-base flex items-center gap-2"><Video className="h-5 w-5 text-primary"/> Your Video</CardTitle>
             </CardHeader>
             <CardContent className="p-2">
@@ -468,17 +512,19 @@ export default function TakeTestPage() {
             </Alert>
           )}
           <Card className="shadow-md flex-grow flex flex-col">
-             <CardHeader className="pb-2">
+             <CardHeader className="p-3 pb-1">
                 <CardTitle className="text-base flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary"/> Security Status</CardTitle>
              </CardHeader>
-             <CardContent className="p-4 text-sm space-y-2 text-muted-foreground">
-                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Fullscreen Active (Attempted)</p>
-                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Tab Focus Monitored</p>
-                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Page Exit/Refresh Warnings Active</p>
-                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Shortcuts/Context Menu Restricted</p>
-                <p className="flex items-center gap-1"><Video className="h-4 w-4 text-green-500"/> Camera Streaming</p>
-                <p className="flex items-center gap-1"><Mic className="h-4 w-4 text-green-500"/> Microphone Active</p>
-             </CardContent>
+             <ScrollArea>
+              <CardContent className="p-3 text-xs space-y-1 text-muted-foreground">
+                  <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Fullscreen Active (Attempted)</p>
+                  <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Tab Focus Monitored</p>
+                  <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Page Exit/Refresh Warnings Active</p>
+                  <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Shortcuts/Context Menu Restricted</p>
+                  <p className="flex items-center gap-1"><Video className="h-3 w-3 text-green-500"/> Camera Streaming</p>
+                  <p className="flex items-center gap-1"><Mic className="h-3 w-3 text-green-500"/> Microphone Active</p>
+              </CardContent>
+             </ScrollArea>
           </Card>
         </div>
       </div>
