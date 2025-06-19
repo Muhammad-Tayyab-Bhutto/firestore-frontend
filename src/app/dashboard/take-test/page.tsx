@@ -10,14 +10,14 @@ import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, C
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { getTestQuestions, submitTestAnswers } from '@/ai/flows/test-session-flow';
-import type { TestQuestion } from '@/ai/flows/test-session-types';
+import type { TestQuestion, SubmitTestAnswersOutput } from '@/ai/flows/test-session-types'; // Added SubmitTestAnswersOutput
 
 export default function TakeTestPage() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
   const [testStarted, setTestStarted] = useState(false);
   const [testSubmitted, setTestSubmitted] = useState(false);
-  const [submissionMessage, setSubmissionMessage] = useState<string | null>(null);
+  const [submissionDetails, setSubmissionDetails] = useState<SubmitTestAnswersOutput | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
   const [proctoringWarning, setProctoringWarning] = useState<string | null>(null);
@@ -25,6 +25,8 @@ export default function TakeTestPage() {
   const [timeLeft, setTimeLeft] = useState(120 * 60); // 120 minutes in seconds
   const [shuffledQuestions, setShuffledQuestions] = useState<TestQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [testInstructions, setTestInstructions] = useState<string | null>(null);
+
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -85,6 +87,9 @@ export default function TakeTestPage() {
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on unmount:", err.message));
+      }
     };
   }, []);
 
@@ -92,6 +97,7 @@ export default function TakeTestPage() {
     if (testSubmitted || isSubmitting) return;
 
     setIsSubmitting(true);
+    setProctoringWarning(null); // Clear any active warning before submission
     try {
       const validAnswers: Record<string, string> = {};
       for (const key in answers) {
@@ -100,25 +106,29 @@ export default function TakeTestPage() {
         }
       }
 
-      const response = await submitTestAnswers({ testId: 'SAMPLE_TEST_001', answers: validAnswers });
+      const response = await submitTestAnswers({ 
+        testId: 'SAMPLE_TEST_001', 
+        answers: validAnswers,
+        isAutoSubmitted: isAutoSubmit,
+        autoSubmitReason: isAutoSubmit ? autoSubmitReason : undefined
+      });
+      
+      setSubmissionDetails(response); // Store full response
+
       if (response.success) {
         if (isAutoSubmit) {
-             toast({ variant: 'destructive', title: "Test Terminated", description: `Test submitted automatically due to: ${autoSubmitReason}.` });
-             setSubmissionMessage(`Test submitted automatically due to: ${autoSubmitReason}. ${response.message || ''}`);
+             toast({ variant: 'destructive', title: "Test Terminated", description: `Test submitted automatically due to: ${autoSubmitReason}. Score: ${response.score !== undefined ? response.score + '%' : 'N/A'}` });
         } else {
-             toast({ title: "Test Submitted!", description: response.message });
-             setSubmissionMessage(response.message || "Test submitted successfully.");
+             toast({ title: "Test Submitted!", description: `Your answers have been recorded. Score: ${response.score !== undefined ? response.score + '%' : 'N/A'}` });
         }
         setTestSubmitted(true);
         setTestStarted(false); 
       } else {
         toast({ variant: 'destructive', title: "Submission Failed", description: response.message });
-        setSubmissionMessage(`Submission Failed: ${response.message}`);
       }
     } catch (error) {
         toast({ variant: 'destructive', title: "Submission Error", description: "Could not submit your test. Please try again or contact support."});
         console.error("Error submitting answers:", error);
-        setSubmissionMessage("An error occurred during submission. Please try again.");
     } finally {
         setIsSubmitting(false);
          if (document.fullscreenElement) {
@@ -159,7 +169,7 @@ export default function TakeTestPage() {
         (elem as any).msRequestFullscreen();
       }
     };
-    if (!document.fullscreenElement) { // Attempt to enter fullscreen only if not already in it
+    if (!document.fullscreenElement) {
         enterFullScreen();
     }
 
@@ -196,11 +206,11 @@ export default function TakeTestPage() {
 
     const disableShortcuts = (e: KeyboardEvent) => {
        const prohibitedCtrlShift = ['i', 'I', 'j', 'J', 'c', 'C']; 
-       const prohibitedCtrl = ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S', 'u', 'U', 'w', 'W', 'x', 'X', 'v', 'V'];
-       const prohibitedKeys = ['F5', 'F11', 'F12', 'PrintScreen', 'ContextMenu'];
+       const prohibitedCtrl = ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S', 'u', 'U', 'w', 'W', 'x', 'X', 'v', 'V', 'a', 'A'];
+       const prohibitedKeys = ['F5', 'F11', 'F12', 'PrintScreen', 'ContextMenu', 'Meta', 'AltGraph', 'ScrollLock', 'Pause', 'Insert', 'Home', 'End', 'PageUp', 'PageDown', 'Escape'];
        const isProhibitedCtrlShift = e.ctrlKey && e.shiftKey && prohibitedCtrlShift.includes(e.key.toLowerCase());
        const isProhibitedCtrl = e.ctrlKey && prohibitedCtrl.includes(e.key.toLowerCase());
-       const isProhibitedMeta = e.metaKey && prohibitedCtrl.includes(e.key.toLowerCase()); 
+       const isProhibitedMeta = e.metaKey && (prohibitedCtrl.includes(e.key.toLowerCase()) || e.key.toLowerCase() === 'meta'); 
        const isProhibitedKey = prohibitedKeys.includes(e.key) || (e.altKey && e.key === 'Tab');
 
 
@@ -262,7 +272,7 @@ export default function TakeTestPage() {
 
     setIsLoadingQuestions(true);
     try {
-      const { questions: fetchedQuestions } = await getTestQuestions({ testId: 'SAMPLE_TEST_001' }); 
+      const { questions: fetchedQuestions, instructions } = await getTestQuestions({ testId: 'SAMPLE_TEST_001' }); 
       
       const array = [...fetchedQuestions];
       for (let i = array.length - 1; i > 0; i--) {
@@ -270,13 +280,14 @@ export default function TakeTestPage() {
         [array[i], array[j]] = [array[j], array[i]];
       }
       setShuffledQuestions(array);   
+      setTestInstructions(instructions || "No specific instructions provided. Follow general test guidelines.");
       
       setCurrentQuestionIndex(0);
       setAnswers({});
       setTimeLeft(120 * 60); 
       setTestStarted(true);
       setTestSubmitted(false);
-      setSubmissionMessage(null);
+      setSubmissionDetails(null);
       setProctoringWarning(null);
       
     } catch (error) {
@@ -296,6 +307,7 @@ export default function TakeTestPage() {
   };
 
   const handleAnswerChange = (questionId: number, answer: string) => {
+    if (testSubmitted) return;
     setAnswers(prev => ({ ...prev, [questionId.toString()]: answer }));
   };
   
@@ -315,15 +327,32 @@ export default function TakeTestPage() {
   
   const currentQ = testStarted && shuffledQuestions.length > 0 ? shuffledQuestions[currentQuestionIndex] : null;
 
-  if (testSubmitted) {
+  if (testSubmitted && submissionDetails) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-10rem)]">
-        <Card className="w-full max-w-md p-8 text-center">
-          <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
+        <Card className="w-full max-w-lg p-8 text-center">
+          <CheckCircle className={`h-16 w-16 mx-auto mb-4 ${submissionDetails.proctoringViolation ? 'text-destructive' : (submissionDetails.passed ? 'text-green-500' : 'text-yellow-500')}`} />
           <CardTitle className="text-2xl">Test Submitted!</CardTitle>
-          <CardDescription className="mt-2">
-            {submissionMessage || "Your answers have been recorded. You will be notified about the results later."}
+          <CardDescription className="mt-2 mb-4">
+            {submissionDetails.message || "Your answers have been recorded."}
           </CardDescription>
+          {submissionDetails.score !== undefined && (
+            <p className="text-xl font-semibold">Your Score: {submissionDetails.score}%</p>
+          )}
+          {submissionDetails.passed !== undefined && (
+            <p className={`text-lg font-medium ${submissionDetails.passed ? 'text-green-600' : 'text-red-600'}`}>
+              Status: {submissionDetails.passed ? 'Passed' : 'Failed'}
+            </p>
+          )}
+          {submissionDetails.proctoringViolation && (
+            <Alert variant="destructive" className="mt-4 text-left">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Proctoring Violation Recorded</AlertTitle>
+                <AlertDescription>
+                    This test session was flagged due to a proctoring violation. The result may be subject to review.
+                </AlertDescription>
+            </Alert>
+          )}
           <Button onClick={() => window.location.href = '/dashboard'} className="mt-6">Back to Dashboard</Button>
         </Card>
       </div>
@@ -342,15 +371,14 @@ export default function TakeTestPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <h3 className="text-xl font-semibold text-card-foreground">Instructions:</h3>
-            <ul className="list-disc list-inside space-y-1 text-muted-foreground bg-muted/50 p-4 rounded-md">
-              <li>Ensure you are in a quiet, well-lit room, alone.</li>
-              <li>Your webcam and microphone must remain on throughout the test.</li>
-              <li>The test will be proctored using AI. Any suspicious activity (tab switching, losing focus, exiting fullscreen, prohibited shortcuts) will result in automatic test submission.</li>
-              <li>Do not switch tabs, open other applications, interact with browser extensions, or use external devices.</li>
-              <li>Copying, pasting, or screen recording is strictly prohibited.</li>
-              <li>Certain browser actions (e.g., refresh, new tab, developer tools) are restricted and will lead to test termination.</li>
-              <li>You have {formatTime(timeLeft)} to complete the test once started.</li>
-            </ul>
+            {isLoadingQuestions && <div className="flex items-center justify-center p-4"><Loader2 className="h-6 w-6 animate-spin text-primary" /> <span className="ml-2">Loading instructions...</span></div>}
+            {testInstructions && !isLoadingQuestions && (
+                <ScrollArea className="h-48 border rounded-md p-4 bg-muted/30">
+                    <div className="whitespace-pre-wrap text-sm text-muted-foreground">{testInstructions}</div>
+                </ScrollArea>
+            )}
+            {!testInstructions && !isLoadingQuestions && <p className="text-muted-foreground">Loading instructions...</p>}
+
 
             {(hasCameraPermission === false || hasMicPermission === false) && (
               <Alert variant="destructive">
@@ -394,7 +422,7 @@ export default function TakeTestPage() {
               disabled={isLoadingQuestions || hasCameraPermission !== true || hasMicPermission !== true}
             >
               {isLoadingQuestions ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {isLoadingQuestions ? "Loading Questions..." : "Start Test"}
+              {isLoadingQuestions ? "Loading Test..." : "Start Test"}
             </Button>
           </CardFooter>
         </Card>
@@ -416,6 +444,7 @@ export default function TakeTestPage() {
       </header>
 
       <div className="flex-grow grid grid-cols-12 gap-4 p-4 overflow-hidden">
+        {/* Question Navigation Panel */}
         <Card className="col-span-12 md:col-span-2 shadow-lg flex flex-col">
           <CardHeader className="p-3 border-b">
             <CardTitle className="text-base flex items-center gap-2"><ListChecks className="h-5 w-5 text-primary"/> Questions</CardTitle>
@@ -427,8 +456,8 @@ export default function TakeTestPage() {
                   key={q.id}
                   variant={currentQuestionIndex === index ? "default" : "outline"}
                   size="sm"
-                  className={`w-full justify-start text-left ${answers[q.id.toString()]?.trim() ? 'font-semibold' : ''} ${currentQuestionIndex === index ? '' : (answers[q.id.toString()]?.trim() ? 'border-green-500' : 'border-muted') }`}
-                  onClick={() => setCurrentQuestionIndex(index)}
+                  className={`w-full justify-start text-left h-auto py-2 ${answers[q.id.toString()]?.trim() ? 'font-semibold' : ''} ${currentQuestionIndex === index ? '' : (answers[q.id.toString()]?.trim() ? 'border-green-500' : 'border-muted') }`}
+                  onClick={() => {if(!testSubmitted) setCurrentQuestionIndex(index)}}
                   disabled={testSubmitted || isSubmitting}
                 >
                   Q {index + 1} {answers[q.id.toString()]?.trim() ? <CheckCircle className="ml-auto h-4 w-4 text-green-600" /> : null}
@@ -438,14 +467,15 @@ export default function TakeTestPage() {
           </ScrollArea>
         </Card>
         
+        {/* Main Question Area */}
         <Card className="col-span-12 md:col-span-7 shadow-lg flex flex-col overflow-hidden">
-          <CardHeader className="border-b">
-            <CardTitle>Question {currentQuestionIndex + 1} of {shuffledQuestions.length}</CardTitle>
+          <CardHeader className="border-b p-3">
+            <CardTitle className="text-lg">Question {currentQuestionIndex + 1} of {shuffledQuestions.length}</CardTitle>
             <Progress value={shuffledQuestions.length > 0 ? ((currentQuestionIndex + 1) / shuffledQuestions.length) * 100 : 0} className="mt-2 h-2" />
           </CardHeader>
           {currentQ && (
             <ScrollArea className="flex-grow">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-4 md:p-6 space-y-4">
                 <p className="text-lg whitespace-pre-wrap">{currentQ.text}</p>
                 {currentQ.type === "mcq" && currentQ.options && (
                   <div className="space-y-2">
@@ -469,7 +499,7 @@ export default function TakeTestPage() {
                     </p>
                     <textarea
                       rows={8}
-                      className="w-full p-2 border rounded-md focus:ring-primary focus:border-primary text-sm bg-background"
+                      className="w-full p-2 border rounded-md focus:ring-primary focus:border-primary text-sm bg-background disabled:opacity-70 disabled:bg-muted/50"
                       placeholder="Type your answer here..."
                       value={answers[currentQ.id.toString()] || ""}
                       onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
@@ -504,7 +534,7 @@ export default function TakeTestPage() {
                 Next <ChevronRight className="ml-1 h-4 w-4"/>
               </Button>
             ) : (
-              <Button onClick={() => handleSubmitTest(false)} className="bg-green-600 hover:bg-green-700 text-white" disabled={isSubmitting || testSubmitted}>
+              <Button onClick={() => handleSubmitTest(false, "Manual submission")} className="bg-green-600 hover:bg-green-700 text-white" disabled={isSubmitting || testSubmitted}>
                 {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4"/>}
                 {isSubmitting ? "Submitting..." : "Submit Test"}
               </Button>
@@ -512,6 +542,7 @@ export default function TakeTestPage() {
           </CardFooter>
         </Card>
 
+        {/* Proctoring & Security Panel */}
         <div className="col-span-12 md:col-span-3 space-y-4 flex flex-col">
           <Card className="shadow-md flex-none">
             <CardHeader className="p-3 pb-1">

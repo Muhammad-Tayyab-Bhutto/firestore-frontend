@@ -1,3 +1,4 @@
+
 "use client";
 import { MainLayout } from "@/components/layout/main-layout";
 import { 
@@ -9,9 +10,10 @@ import {
   Briefcase,
   Settings,
   DollarSign,
-  ClipboardList,
+  ClipboardList, // Added for Test Results
   GraduationCap,
-  CalendarClock // Added for Test Shifts
+  CalendarClock,
+  ListChecks // Added for Manage Test Questions
 } from 'lucide-react';
 
 const adminNavItems = [
@@ -20,7 +22,9 @@ const adminNavItems = [
   { href: "/admin/applications", label: "All Applications", icon: Users, badge: 5 }, // Example badge
   { href: "/admin/challan-verification", label: "Challan Verification", icon: FileCheck2, badge: 2 },
   { href: "/admin/test-centers", label: "Test Centers", icon: Building },
-  { href: "/admin/test-shifts", label: "Manage Test Shifts", icon: CalendarClock }, // New Item
+  { href: "/admin/test-shifts", label: "Manage Test Shifts", icon: CalendarClock },
+  { href: "/admin/test-questions", label: "Manage Test Questions", icon: ListChecks }, // New Item
+  { href: "/admin/test-results", label: "View Test Results", icon: ClipboardList }, // New Item
   { href: "/admin/offer-letters", label: "Offer Letters", icon: FileText },
   { href: "/admin/enrollment", label: "Enrollment Tracking", icon: Briefcase },
   { isSectionTitle: true, label: "Configuration", icon: Users /* Dummy icon */ },
