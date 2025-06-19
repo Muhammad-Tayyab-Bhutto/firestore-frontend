@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Card } from "@/components/ui/card";
 
 type ApplicationStatus = "Pending" | "Under Review" | "Approved" | "Rejected" | "Interview Scheduled";
 interface Application {
