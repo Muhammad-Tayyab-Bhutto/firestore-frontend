@@ -118,11 +118,11 @@ export default function TakeTestPage() {
         (elem as any).msRequestFullscreen();
       }
     };
-    enterFullScreen(); // Attempt fullscreen when test starts
+    enterFullScreen();
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
-      e.returnValue = 'Are you sure you want to leave? Your test progress might be lost.'; // Standard way to trigger browser prompt
+      e.returnValue = 'Are you sure you want to leave? Your test progress might be lost.';
     };
 
     const handleVisibilityChange = () => {
@@ -150,22 +150,12 @@ export default function TakeTestPage() {
         setTimeout(() => setProctoringWarning(null), 3000);
       }
     };
-
-    const handleRouteChange = (url: string) => {
-      if (testStarted && !testSubmitted) {
-        if (!window.confirm('You are attempting to leave the test. Your progress may be lost. Are you sure?')) {
-          router.events.emit('routeChangeError');
-          throw 'Route change aborted by user.';
-        }
-      }
-    };
     
     window.addEventListener('beforeunload', handleBeforeUnload);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleBlur);
     document.addEventListener('contextmenu', disableContextMenu);
     document.addEventListener('keydown', disableShortcuts);
-    router.events.on('routeChangeStart', handleRouteChange);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
@@ -173,12 +163,11 @@ export default function TakeTestPage() {
       window.removeEventListener('blur', handleBlur);
       document.removeEventListener('contextmenu', disableContextMenu);
       document.removeEventListener('keydown', disableShortcuts);
-      router.events.off('routeChangeStart', handleRouteChange);
       if (document.fullscreenElement) {
         document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen:", err));
       }
     };
-  }, [testStarted, testSubmitted, router, router.events]);
+  }, [testStarted, testSubmitted, router]);
 
 
   const handleStartTest = async () => {
@@ -218,7 +207,6 @@ export default function TakeTestPage() {
       setTestSubmitted(false);
       setProctoringWarning(null);
       
-      // Simulate AI warnings after a delay
       setTimeout(() => { if (testStarted && !testSubmitted) setProctoringWarning("AI Alert: Please keep your face clearly visible."); }, 30000);
       setTimeout(() => { if (testStarted && !testSubmitted) setProctoringWarning(null); }, 40000);
 
@@ -273,7 +261,6 @@ export default function TakeTestPage() {
         console.error("Error submitting answers:", error);
     } finally {
         setIsSubmitting(false);
-        // Fullscreen exit and listener cleanup is now handled in the main lockdown useEffect
     }
   }, [answers, toast, shuffledQuestions]); 
   
@@ -486,7 +473,7 @@ export default function TakeTestPage() {
              <CardContent className="p-4 text-sm space-y-2 text-muted-foreground">
                 <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Fullscreen Active (Attempted)</p>
                 <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Tab Focus Monitored</p>
-                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Navigation Restricted (Warnings)</p>
+                <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Page Exit/Refresh Warnings Active</p>
                 <p className="flex items-center gap-1"><CheckCircle className="h-4 w-4 text-green-500"/> Shortcuts/Context Menu Restricted</p>
                 <p className="flex items-center gap-1"><Video className="h-4 w-4 text-green-500"/> Camera Streaming</p>
                 <p className="flex items-center gap-1"><Mic className="h-4 w-4 text-green-500"/> Microphone Active</p>
@@ -497,3 +484,4 @@ export default function TakeTestPage() {
     </div>
   );
 }
+
