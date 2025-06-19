@@ -1,3 +1,4 @@
+
 "use client";
 import React, { useState } from 'react';
 import { Calendar } from "@/components/ui/calendar";
@@ -14,6 +15,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { CalendarIcon, Clock, MapPin, CheckCircle } from "lucide-react";
+import { Label } from "@/components/ui/label"; // Added import
 
 // Placeholder data - in a real app, this would come from an API
 const availableSlots: Record<string, string[]> = {
