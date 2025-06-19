@@ -24,20 +24,22 @@ export default function TakeTestPage() {
   const [timeLeft, setTimeLeft] = useState(120 * 60); // 120 minutes in seconds
   const [questions, setQuestions] = useState<TestQuestion[]>([]);
   const [shuffledQuestions, setShuffledQuestions] = useState<TestQuestion[]>([]);
-  const [answers, setAnswers] = useState<Record<string, string>>({}); // question.id (string) -> answer
+  const [answers, setAnswers] = useState<Record<string, string>>({});
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const testContainerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const router = useRouter();
 
   const requestPermissions = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      streamRef.current = mediaStream;
       setHasCameraPermission(true);
       setHasMicPermission(true);
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+        videoRef.current.srcObject = mediaStream;
       }
     } catch (error) {
       console.error('Error accessing media devices:', error);
@@ -59,25 +61,45 @@ export default function TakeTestPage() {
     }
   }, [toast]);
 
+  // Effect to request permissions initially before test starts
   useEffect(() => {
-    if (!testStarted && (hasCameraPermission === null || hasMicPermission === null)) {
+    if (!testStarted && !streamRef.current && (hasCameraPermission === null || hasMicPermission === null)) {
       requestPermissions();
     }
   }, [testStarted, hasCameraPermission, hasMicPermission, requestPermissions]);
 
+  // Effect to attach stream to video element when it's available or test starts/stops
   useEffect(() => {
-    const currentVideoRef = videoRef.current;
+    const videoElement = videoRef.current;
+    const currentStream = streamRef.current;
+
+    if (videoElement && currentStream) {
+      if (videoElement.srcObject !== currentStream) {
+        videoElement.srcObject = currentStream;
+        videoElement.play().catch(error => console.warn("Video play failed:", error));
+      }
+    }
+    // Ensure video preview is active if permissions are granted and test hasn't started
+    else if (videoElement && !testStarted && hasCameraPermission && currentStream) {
+       if (videoElement.srcObject !== currentStream) {
+        videoElement.srcObject = currentStream;
+        videoElement.play().catch(error => console.warn("Video play failed on pre-test:", error));
+      }
+    }
+  }, [testStarted, hasCameraPermission, videoRef, streamRef]); // videoRef and streamRef themselves are stable, .current isn't a dep
+
+  // Effect for cleanup on component unmount
+  useEffect(() => {
     return () => {
-      if (currentVideoRef && currentVideoRef.srcObject) {
-        const stream = currentVideoRef.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
-        if (currentVideoRef) { // Check again as it might be null in strict mode cleanup
-            currentVideoRef.srcObject = null;
-        }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
       }
     };
   }, []);
-
 
   useEffect(() => {
     let timerId: NodeJS.Timeout;
@@ -87,39 +109,42 @@ export default function TakeTestPage() {
       }, 1000);
     } else if (testStarted && timeLeft === 0 && !testSubmitted) {
       toast({ title: "Time's Up!", description: "Your test will be submitted automatically." });
-      handleSubmitTest(true); // Auto-submit
+      handleSubmitTest(true); 
     }
     return () => clearInterval(timerId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testStarted, timeLeft, testSubmitted]); 
   
   const handleFullscreenAndFocus = useCallback(() => {
+    let visibilityHandler: () => void;
+    let blurHandler: () => void;
+
     if (testContainerRef.current && !document.fullscreenElement) {
       testContainerRef.current.requestFullscreen().catch(err => {
-        toast({variant: 'destructive', title: "Fullscreen Failed", description: "Could not enter fullscreen mode. Please try manually."})
+        toast({variant: 'destructive', title: "Fullscreen Recommended", description: "Please enable fullscreen mode for the best experience."})
         console.warn("Cannot enter fullscreen", err);
       });
     }
 
-    const handleVisibilityChange = () => {
+    visibilityHandler = () => {
       if (document.hidden && testStarted && !testSubmitted) {
         setProctoringWarning("AI Alert: You have switched tabs/windows. This is being monitored.");
       } else {
         setProctoringWarning(null);
       }
     };
-    const handleBlur = () => {
+    blurHandler = () => {
        if (testStarted && !testSubmitted) {
         setProctoringWarning("AI Alert: Test window lost focus. Please return to the test immediately.");
        }
     }
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
+    document.addEventListener('visibilitychange', visibilityHandler);
+    window.addEventListener('blur', blurHandler);
     
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', visibilityHandler);
+      window.removeEventListener('blur', blurHandler);
       if (document.fullscreenElement && testContainerRef.current && document.fullscreenElement === testContainerRef.current) {
         document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen:", err));
       }
@@ -128,15 +153,16 @@ export default function TakeTestPage() {
 
 
   const handleStartTest = async () => {
-    if (hasCameraPermission === false || hasMicPermission === false) {
+    if (hasCameraPermission !== true || hasMicPermission !== true) {
       toast({
         variant: 'destructive',
         title: 'Permissions Required',
         description: 'Camera and microphone access are mandatory to start the test. Please enable them.',
       });
+      requestPermissions(); // Re-attempt to get permissions
       return;
     }
-    if (!videoRef.current?.srcObject && hasCameraPermission === true) {
+    if (!streamRef.current && hasCameraPermission === true) { // Check streamRef instead of videoRef.srcObject
         toast({
             variant: 'destructive',
             title: 'Camera Stream Error',
@@ -145,19 +171,17 @@ export default function TakeTestPage() {
         return;
     }
 
-
     setIsLoadingQuestions(true);
     try {
       const { questions: fetchedQuestions } = await getTestQuestions({ testId: 'SAMPLE_TEST_001' }); 
       
       const array = [...fetchedQuestions];
-      // Fisher-Yates (Knuth) Shuffle
       for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [array[i], array[j]] = [array[j], array[i]];
       }
-      setQuestions(fetchedQuestions); // Keep original order for reference if needed
-      setShuffledQuestions(array);   // Use shuffled questions for display
+      setQuestions(fetchedQuestions); 
+      setShuffledQuestions(array);   
       
       setCurrentQuestionIndex(0);
       setAnswers({});
@@ -203,7 +227,15 @@ export default function TakeTestPage() {
 
     setIsSubmitting(true);
     try {
-      const response = await submitTestAnswers({ testId: 'SAMPLE_TEST_001', answers });
+      // Filter out any potential undefined answers before submission
+      const validAnswers: Record<string, string> = {};
+      for (const key in answers) {
+        if (answers[key] !== undefined && answers[key] !== null) {
+          validAnswers[key] = answers[key];
+        }
+      }
+
+      const response = await submitTestAnswers({ testId: 'SAMPLE_TEST_001', answers: validAnswers });
       if (response.success) {
         toast({ title: "Test Submitted!", description: response.message });
         setTestSubmitted(true);
@@ -224,9 +256,9 @@ export default function TakeTestPage() {
           document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on submit:", err));
         }
     }
-  }, [answers, toast, router, shuffledQuestions]); 
+  }, [answers, toast, shuffledQuestions]); 
   
-  if ((hasCameraPermission === null || hasMicPermission === null) && !testStarted) {
+  if ((hasCameraPermission === null || hasMicPermission === null) && !testStarted && !streamRef.current) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-10rem)]">
         <Card className="w-full max-w-md p-6 text-center">
@@ -349,14 +381,14 @@ export default function TakeTestPage() {
           </CardHeader>
           {currentQ && (
             <CardContent className="flex-grow p-6 space-y-4 overflow-y-auto">
-              <p className="text-lg">{currentQ.text}</p>
+              <p className="text-lg whitespace-pre-wrap">{currentQ.text}</p>
               {currentQ.type === "mcq" && currentQ.options && (
                 <div className="space-y-2">
                   {currentQ.options.map((option, index) => (
                     <Button 
                       key={index} 
                       variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
-                      className="w-full justify-start text-left h-auto py-3"
+                      className="w-full justify-start text-left h-auto py-3 whitespace-normal"
                       onClick={() => handleAnswerChange(currentQ.id, option)}
                     >
                       {option}
@@ -365,13 +397,18 @@ export default function TakeTestPage() {
                 </div>
               )}
               {currentQ.type === "text" && (
-                <textarea
-                  rows={8}
-                  className="w-full p-2 border rounded-md focus:ring-primary focus:border-primary text-sm bg-background"
-                  placeholder="Type your answer here..."
-                  value={answers[currentQ.id.toString()] || ""}
-                  onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
-                />
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Please provide your answer in the text area below. For complex formatting (e.g., mathematical equations, code blocks), please use standard conventions as rich text input is not currently supported.
+                  </p>
+                  <textarea
+                    rows={8}
+                    className="w-full p-2 border rounded-md focus:ring-primary focus:border-primary text-sm bg-background"
+                    placeholder="Type your answer here..."
+                    value={answers[currentQ.id.toString()] || ""}
+                    onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
+                  />
+                </>
               )}
               {currentQ.type === "truefalse" && currentQ.options && (
                  <div className="space-y-2">
@@ -416,9 +453,9 @@ export default function TakeTestPage() {
             </CardContent>
           </Card>
            {proctoringWarning && (
-            <Alert variant="destructive" className="flex-none">
+            <Alert variant="destructive" className="flex-none shadow-lg">
               <AlertTriangle className="h-5 w-5" />
-              <AlertTitle>AI Proctoring Alert!</AlertTitle>
+              <AlertTitle className="font-semibold">AI Proctoring Alert!</AlertTitle>
               <AlertDescription>{proctoringWarning}</AlertDescription>
             </Alert>
           )}
@@ -438,3 +475,5 @@ export default function TakeTestPage() {
     </div>
   );
 }
+
+    
