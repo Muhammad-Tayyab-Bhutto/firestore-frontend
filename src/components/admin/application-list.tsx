@@ -1,3 +1,4 @@
+
 "use client";
 import React, { useState, useMemo } from 'react';
 import {
@@ -116,17 +117,6 @@ export function ApplicationList() {
       </div>
 
       <Card className="shadow-lg">
-      <TableHeader className="bg-muted/50 rounded-t-lg sr-only"> {/* Hidden header for structure, actual headers in table */}
-          <TableRow>
-            <TableHead>ID</TableHead>
-            <TableHead>Applicant Name</TableHead>
-            <TableHead>CNIC</TableHead>
-            <TableHead>Program</TableHead>
-            <TableHead>Submission Date</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Actions</TableHead>
-          </TableRow>
-        </TableHeader>
         <div className="overflow-x-auto">
         <Table>
           <TableHeader className="bg-muted/50">
