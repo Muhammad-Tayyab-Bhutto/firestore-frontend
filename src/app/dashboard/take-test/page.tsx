@@ -8,7 +8,9 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send, CheckCircle, Loader2 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
-import { getTestQuestions, submitTestAnswers, type TestQuestion } from '@/ai/flows/test-session-flow';
+import { getTestQuestions, submitTestAnswers } from '@/ai/flows/test-session-flow';
+import type { TestQuestion } from '@/ai/flows/test-session-types'; // Updated import path
+import { useRouter } from 'next/navigation'; // Added for redirecting
 
 export default function TakeTestPage() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
@@ -26,6 +28,7 @@ export default function TakeTestPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const testContainerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const router = useRouter(); // Added for redirecting
 
   const requestPermissions = useCallback(async () => {
     try {
@@ -147,15 +150,12 @@ export default function TakeTestPage() {
       // Setup fullscreen and focus listeners
       const cleanupFocusListeners = handleFullscreenAndFocus();
       // Store cleanup function to call when test ends or component unmounts
-      // This is a bit simplified; in a real app, manage this more robustly
       (window as any).cleanupFocusListeners = cleanupFocusListeners;
 
 
       // Simulate AI warnings
       setTimeout(() => setProctoringWarning("AI Alert: Please keep your face clearly visible."), 30000);
       setTimeout(() => setProctoringWarning(null), 40000);
-      // setTimeout(() => setProctoringWarning("AI Alert: Multiple faces detected. Please ensure you are alone."), 90000);
-      // setTimeout(() => setProctoringWarning(null), 100000);
     } catch (error) {
       toast({ variant: 'destructive', title: "Failed to Load Test", description: "Could not fetch test questions. Please try again."});
       console.error("Error fetching questions:", error);
