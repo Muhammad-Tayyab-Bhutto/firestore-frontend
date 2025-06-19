@@ -1,3 +1,4 @@
+
 "use client";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -11,7 +12,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { 
+  Sheet, 
+  SheetContent, 
+  SheetTrigger,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription
+} from "@/components/ui/sheet";
 import { Menu, LogOut, UserCircle, LayoutDashboard, Settings } from 'lucide-react';
 import { Logo } from '@/components/icons/logo';
 import React from 'react';
@@ -118,8 +126,19 @@ export function AppHeader({ navItems = [], sidebarNavItems = [], isAuthenticated
               </Button>
             </SheetTrigger>
             <SheetContent side="right" className="w-[300px] sm:w-[400px] bg-background p-6">
+              <SheetHeader className="mb-4">
+                <SheetTitle>Navigation Menu</SheetTitle>
+                <SheetDescription>
+                  Select an option to navigate or manage your account.
+                </SheetDescription>
+              </SheetHeader>
               <nav className="flex flex-col space-y-4">
                 {mobileNavItems.map((item) => (
+                  item.isSectionTitle ? (
+                    <div key={item.label} className="px-2 pt-2 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      {item.label}
+                    </div>
+                  ) : (
                   <Link
                     key={item.href}
                     href={item.href}
@@ -132,12 +151,24 @@ export function AppHeader({ navItems = [], sidebarNavItems = [], isAuthenticated
                     {item.icon && <item.icon className="h-5 w-5 text-muted-foreground" />}
                     <span>{item.label}</span>
                   </Link>
+                  )
                 ))}
                 <DropdownMenuSeparator />
                 {!isAuthenticated && (
                   <>
-                    <Button variant="outline" onClick={() => router.push('/login')}>Login</Button>
-                    <Button onClick={() => router.push('/register')} className="bg-accent hover:bg-accent/90 text-accent-foreground">Register</Button>
+                    <Button variant="outline" onClick={() => { router.push('/login'); const trigger = document.querySelector('[data-radix-collection-item] > button[aria-label="Toggle menu"]'); if (trigger instanceof HTMLElement) trigger.click(); }}>Login</Button>
+                    <Button onClick={() => {router.push('/register'); const trigger = document.querySelector('[data-radix-collection-item] > button[aria-label="Toggle menu"]'); if (trigger instanceof HTMLElement) trigger.click();}} className="bg-accent hover:bg-accent/90 text-accent-foreground">Register</Button>
+                  </>
+                )}
+                 {isAuthenticated && ( // Also ensure authenticated users can logout from mobile menu
+                  <>
+                    <DropdownMenuSeparator />
+                     <Button variant="outline" onClick={() => { router.push(isAdmin ? '/admin/settings' : '/settings'); const trigger = document.querySelector('[data-radix-collection-item] > button[aria-label="Toggle menu"]'); if (trigger instanceof HTMLElement) trigger.click(); }}>
+                        <Settings className="mr-2 h-4 w-4" /> Settings
+                    </Button>
+                    <Button variant="destructive" onClick={() => { handleLogout(); const trigger = document.querySelector('[data-radix-collection-item] > button[aria-label="Toggle menu"]'); if (trigger instanceof HTMLElement) trigger.click();}}>
+                        <LogOut className="mr-2 h-4 w-4" /> Logout
+                    </Button>
                   </>
                 )}
               </nav>
