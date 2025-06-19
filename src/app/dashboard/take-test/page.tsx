@@ -10,7 +10,7 @@ import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, C
 import { Progress } from '@/components/ui/progress';
 import { getTestQuestions, submitTestAnswers } from '@/ai/flows/test-session-flow';
 import type { TestQuestion } from '@/ai/flows/test-session-types';
-import { useRouter } from 'next/navigation';
+// Removed: import { useRouter } from 'next/navigation'; // No longer needed for router.events
 
 export default function TakeTestPage() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
@@ -28,7 +28,7 @@ export default function TakeTestPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
-  const router = useRouter();
+  // Removed: const router = useRouter(); // No longer needed for router.events
 
   const requestPermissions = useCallback(async () => {
     try {
@@ -111,7 +111,7 @@ export default function TakeTestPage() {
     const enterFullScreen = () => {
       const elem = document.documentElement;
       if (elem.requestFullscreen) {
-        elem.requestFullscreen().catch(err => console.warn("Fullscreen request failed:", err));
+        elem.requestFullscreen().catch(err => console.warn("Fullscreen request failed:", err.message));
       } else if ((elem as any).webkitRequestFullscreen) { /* Safari */
         (elem as any).webkitRequestFullscreen();
       } else if ((elem as any).msRequestFullscreen) { /* IE11 */
@@ -164,10 +164,10 @@ export default function TakeTestPage() {
       document.removeEventListener('contextmenu', disableContextMenu);
       document.removeEventListener('keydown', disableShortcuts);
       if (document.fullscreenElement) {
-        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen:", err));
+        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen:", err.message));
       }
     };
-  }, [testStarted, testSubmitted, router]);
+  }, [testStarted, testSubmitted]);
 
 
   const handleStartTest = async () => {
@@ -287,7 +287,8 @@ export default function TakeTestPage() {
           <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />
           <CardTitle className="text-2xl">Test Submitted Successfully!</CardTitle>
           <CardDescription className="mt-2">Your answers have been recorded. You will be notified about the results later.</CardDescription>
-          <Button onClick={() => router.push('/dashboard')} className="mt-6">Back to Dashboard</Button>
+          {/* Removed router.push for now */}
+          <Button onClick={() => window.location.href = '/dashboard'} className="mt-6">Back to Dashboard</Button>
         </Card>
       </div>
     );
