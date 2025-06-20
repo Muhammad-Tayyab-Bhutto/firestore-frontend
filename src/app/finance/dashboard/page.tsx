@@ -70,8 +70,12 @@ export default function FinanceDashboardPage() {
                 <CardTitle className="text-xl font-semibold text-primary">Quick Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-                <Link href="/admin/challan-verification" legacyBehavior passHref>
-                  <Button className="w-full bg-primary hover:bg-primary/90" asChild><a href="/admin/challan-verification"><FileCheck2 className="mr-2"/> View &amp; Verify Challans</a></Button>
+                <Link href="/admin/challan-verification" passHref>
+                  <Button className="w-full bg-primary hover:bg-primary/90" asChild>
+                    <>
+                      <FileCheck2 className="mr-2"/> View &amp; Verify Challans
+                    </>
+                  </Button>
                 </Link>
                 <Button variant="secondary" className="w-full"><PlusCircle className="mr-2"/> Generate New Challan</Button>
                 <Button variant="outline" className="w-full hover:border-destructive hover:text-destructive hover:bg-destructive/10">Flag Payment Issue</Button>
