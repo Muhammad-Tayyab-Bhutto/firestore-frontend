@@ -17,7 +17,7 @@ export default function HodDashboardPage() {
   const overviewStats = [
     { title: "Students in Department", value: "350", icon: Users, color: "text-primary" },
     { title: "Courses Offered", value: "25", icon: BookOpen, color: "text-secondary" },
-    { title: "Faculty Members", value: "15", icon: Users, color: "text-accent" },
+    { title: "Faculty Members", value: "15", icon: UserCheck, color: "text-accent" }, // Changed icon
     { title: "Avg. Student Performance", value: "78%", icon: BarChart2, color: "text-green-500" },
   ];
   
@@ -29,21 +29,21 @@ export default function HodDashboardPage() {
 
   return (
     <div className="space-y-8">
-       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
+       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
             <h1 className="text-3xl font-headline font-semibold text-primary">HOD Dashboard</h1>
             <CardDescription className="mt-1">Department of {departmentName}</CardDescription>
         </div>
          <div className="flex gap-2 mt-2 sm:mt-0">
             <Button variant="outline"><ListFilter className="mr-2 h-4 w-4"/> Filters</Button>
-            <Button><Download className="mr-2 h-4 w-4"/> Department Reports</Button>
+            <Button className="bg-accent hover:bg-accent/90 text-accent-foreground"><Download className="mr-2 h-4 w-4"/> Department Reports</Button>
          </div>
       </div>
 
       {/* Key Metrics */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         {overviewStats.map(stat => (
-          <Card key={stat.title} className="shadow-md hover:shadow-lg transition-shadow bg-card">
+          <Card key={stat.title} className="shadow-lg hover:shadow-xl transition-shadow duration-300 bg-card">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
               <stat.icon className={`h-5 w-5 ${stat.color}`} />
@@ -58,31 +58,31 @@ export default function HodDashboardPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Curriculum & Enrollment Actions */}
         <Card className="lg:col-span-2 shadow-lg bg-card">
-            <CardHeader>
+            <CardHeader className="pb-3">
                 <CardTitle className="text-xl font-semibold text-primary">Curriculum &amp; Enrollment Management</CardTitle>
                 <CardDescription>Oversee courses and student enrollments for {departmentName}.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                     <Button variant="default" className="w-full"><Edit className="mr-2"/> Manage Courses</Button>
+                     <Button className="w-full bg-primary hover:bg-primary/90"><Edit className="mr-2"/> Manage Courses</Button>
                      <Button variant="secondary" className="w-full"><UserCheck className="mr-2"/> Approve Subject Enrollments</Button>
                 </div>
                  <Input placeholder="Search student or course..." className="mt-4"/>
                  <p className="text-sm text-muted-foreground">Detailed student academic performance and enrollment matrices will be available here.</p>
             </CardContent>
-             <CardFooter>
+             <CardFooter className="border-t pt-4">
                 <Button variant="outline">View All Student Records</Button>
             </CardFooter>
         </Card>
         
         {/* Department Notifications */}
          <Card className="shadow-lg bg-card">
-            <CardHeader>
+            <CardHeader className="pb-3">
                 <CardTitle className="text-xl font-semibold text-primary flex items-center"><Bell className="mr-2 h-5 w-5"/>Notifications</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 max-h-72 overflow-y-auto">
                  {notifications.map(notif => (
-                    <div key={notif.id} className={`p-3 rounded-md border ${notif.type === 'action' ? 'border-accent/50 bg-accent/10' : 'border-primary/20 bg-primary/5'}`}>
+                    <div key={notif.id} className={`p-3 rounded-md border ${notif.type === 'action' ? 'border-accent/50 bg-accent/10 text-accent-foreground' : 'border-primary/20 bg-primary/5 text-primary-foreground'}`}>
                         <p className="text-sm font-medium text-card-foreground">{notif.text}</p>
                         <p className="text-xs text-muted-foreground">{notif.time}</p>
                     </div>
@@ -92,14 +92,14 @@ export default function HodDashboardPage() {
         </Card>
       </div>
       
-      <PlaceholderChart title="Student Performance Analytics (Placeholder)" description={`Grade distributions and progression rates for ${departmentName}.`} className="shadow-lg bg-card"/>
+      <PlaceholderChart title="Student Performance Analytics" description={`Grade distributions and progression rates for ${departmentName}.`} className="shadow-lg bg-card"/>
       
        <Card className="shadow-lg bg-card">
-        <CardHeader>
+        <CardHeader className="pb-3">
             <CardTitle className="text-xl font-semibold text-primary">Faculty &amp; Coordinator Interaction</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-            <Button variant="outline" className="w-full md:w-auto"><MessageCircle className="mr-2"/> Message Department Coordinators</Button>
+            <Button variant="outline" className="w-full md:w-auto hover:bg-primary/5 hover:text-primary"><MessageCircle className="mr-2"/> Message Department Coordinators</Button>
             <p className="text-sm text-muted-foreground">Faculty performance metrics and communication tools will be available here.</p>
         </CardContent>
       </Card>

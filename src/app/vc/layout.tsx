@@ -1,7 +1,6 @@
 
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import { AppHeader } from "@/components/layout/app-header"; // Generic header for consistency
 import { Logo } from "@/components/icons/logo";
 import Link from "next/link";
 
@@ -9,7 +8,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
   title: "Vice Chancellor Portal - AdmitPro",
-  description: "Vice Chancellor Portal for AdmitPro System",
+  description: "Vice Chancellor Portal for AdmitPro University System",
 };
 
 export default function VcLayout({
@@ -28,11 +27,11 @@ export default function VcLayout({
           {/* Minimal VC-specific navigation or user profile can go here */}
         </div>
       </header>
-      <main className="flex-grow container mx-auto p-4 sm:p-6 lg:p-8">
+      <main className="flex-grow container mx-auto p-6 md:p-8">
         {children}
       </main>
-      <footer className="py-4 text-center text-sm text-muted-foreground border-t">
-        &copy; {new Date().getFullYear()} AdmitPro. Vice Chancellor Portal.
+      <footer className="py-6 text-center text-sm text-muted-foreground border-t">
+        &copy; {new Date().getFullYear()} AdmitPro University. Vice Chancellor Portal.
       </footer>
     </div>
   );

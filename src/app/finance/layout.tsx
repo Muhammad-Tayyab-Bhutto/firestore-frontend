@@ -8,7 +8,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
   title: "Finance Portal - AdmitPro",
-  description: "Finance Department Portal for AdmitPro System",
+  description: "Finance Department Portal for AdmitPro University System",
 };
 
 export default function FinanceLayout({
@@ -27,11 +27,11 @@ export default function FinanceLayout({
           {/* Minimal Finance-specific navigation or user profile can go here */}
         </div>
       </header>
-      <main className="flex-grow container mx-auto p-4 sm:p-6 lg:p-8">
+      <main className="flex-grow container mx-auto p-6 md:p-8">
         {children}
       </main>
-      <footer className="py-4 text-center text-sm text-muted-foreground border-t">
-        &copy; {new Date().getFullYear()} AdmitPro. Finance Portal.
+      <footer className="py-6 text-center text-sm text-muted-foreground border-t">
+        &copy; {new Date().getFullYear()} AdmitPro University. Finance Portal.
       </footer>
     </div>
   );

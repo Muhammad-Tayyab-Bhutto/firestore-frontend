@@ -37,21 +37,21 @@ const recentPostings = [
 export default function CdcDashboardPage() {
   return (
     <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
             <h1 className="text-3xl font-headline font-semibold text-primary">Career Development Center</h1>
             <CardDescription className="mt-1">Facilitating student career growth and industry connections.</CardDescription>
         </div>
         <div className="flex gap-2 mt-2 sm:mt-0">
             <Button variant="outline"><ListFilter className="mr-2 h-4 w-4"/> Filters</Button>
-            <Button><Download className="mr-2 h-4 w-4"/> Export Data</Button>
+            <Button className="bg-accent hover:bg-accent/90 text-accent-foreground"><Download className="mr-2 h-4 w-4"/> Export Data</Button>
         </div>
       </div>
 
       {/* Key Metrics */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         {overviewStats.map(stat => (
-          <Card key={stat.title} className="shadow-md hover:shadow-lg transition-shadow bg-card">
+          <Card key={stat.title} className="shadow-lg hover:shadow-xl transition-shadow duration-300 bg-card">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
               <stat.icon className={`h-5 w-5 ${stat.color}`} />
@@ -67,11 +67,11 @@ export default function CdcDashboardPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Actions */}
         <Card className="lg:col-span-1 shadow-lg bg-card">
-            <CardHeader>
+            <CardHeader className="pb-3">
                 <CardTitle className="text-xl font-semibold text-primary">CDC Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-                <Button className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"><PlusCircle className="mr-2"/> Publish Job/Internship</Button>
+                <Button className="w-full bg-primary hover:bg-primary/90"><PlusCircle className="mr-2"/> Publish Job/Internship</Button>
                 <Button variant="secondary" className="w-full"><CalendarCheck className="mr-2"/> Schedule Career Fair</Button>
                 <Button variant="outline" className="w-full"><Users className="mr-2"/> Assign Counselors</Button>
                 <Button variant="outline" className="w-full"><Mail className="mr-2"/> Notify Students</Button>
@@ -80,7 +80,7 @@ export default function CdcDashboardPage() {
 
         {/* Recent Job Postings */}
         <Card className="lg:col-span-2 shadow-lg bg-card">
-            <CardHeader>
+            <CardHeader className="pb-3">
                 <CardTitle className="text-xl font-semibold text-primary">Recent Job Postings</CardTitle>
                 <CardDescription>Latest opportunities for students.</CardDescription>
             </CardHeader>
@@ -92,31 +92,31 @@ export default function CdcDashboardPage() {
                             <TableRow key={p.id}>
                                 <TableCell className="font-medium">{p.title}</TableCell>
                                 <TableCell>{p.company}</TableCell>
-                                <TableCell><Badge variant="outline">{p.type}</Badge></TableCell>
+                                <TableCell><Badge variant="outline" className="border-secondary text-secondary">{p.type}</Badge></TableCell>
                                 <TableCell>
-                                    <Badge className={p.status === "Open" ? "bg-green-100 text-green-700" : "bg-muted"}>{p.status}</Badge>
+                                    <Badge className={p.status === "Open" ? "bg-green-100 text-green-700 border-green-300" : "bg-muted text-muted-foreground"}>{p.status}</Badge>
                                 </TableCell>
                             </TableRow>
                         ))}
+                         {recentPostings.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No recent job postings.</p>}
                     </TableBody>
                 </Table>
-                 {recentPostings.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No recent job postings.</p>}
             </CardContent>
-            <CardFooter className="flex justify-end">
-                <Button variant="link">View All Postings</Button>
+            <CardFooter className="flex justify-end border-t pt-4">
+                <Button variant="link" className="text-primary hover:text-primary/80">View All Postings</Button>
             </CardFooter>
         </Card>
       </div>
       
-      <PlaceholderChart title="Student Placement Trends (Placeholder)" description="Tracking placement rates by department and company engagement." className="shadow-lg bg-card"/>
+      <PlaceholderChart title="Student Placement Trends" description="Tracking placement rates by department and company engagement." className="shadow-lg bg-card"/>
       
       <Card className="shadow-lg bg-card">
-        <CardHeader>
+        <CardHeader className="pb-3">
             <CardTitle className="text-xl font-semibold text-primary">Track Graduating Students &amp; Feedback</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
             <Input placeholder="Search graduating student by name or CMS ID..." />
-            <Button variant="outline" className="w-full md:w-auto"><TrendingUp className="mr-2"/> View Employment Status Feedback</Button>
+            <Button variant="outline" className="w-full md:w-auto hover:bg-primary/5 hover:text-primary"><TrendingUp className="mr-2"/> View Employment Status Feedback</Button>
             <p className="text-sm text-muted-foreground">Detailed tracking and feedback forms will be available here.</p>
         </CardContent>
       </Card>
