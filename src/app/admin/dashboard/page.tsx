@@ -1,36 +1,54 @@
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, FileCheck2, DollarSign, BookOpenCheck, Briefcase, BarChart3, Activity, FileText } from "lucide-react";
+import { Users, FileCheck2, DollarSign, BookOpenCheck, Briefcase, BarChart3, Activity, FileText, Settings, ScrollText, ListOrdered, Contact, GraduationCap } from "lucide-react";
 import { Metadata } from "next";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { PlaceholderChart } from "@/components/common/placeholder-chart";
 
 export const metadata: Metadata = {
   title: "Admin Dashboard - AdmitPro",
 };
 
 const overviewStats = [
-  { title: "Total Applications", value: "1,250", icon: Users, color: "text-blue-500", bgColor: "bg-blue-100", href: "/admin/applications" },
+  { title: "Total Applications", value: "1,250", icon: Users, color: "text-primary", bgColor: "bg-primary/10", href: "/admin/applications" },
   { title: "Pending Verification", value: "75", icon: FileCheck2, color: "text-yellow-500", bgColor: "bg-yellow-100", href: "/admin/challan-verification" },
   { title: "Fees Collected", value: "$55,000", icon: DollarSign, color: "text-green-500", bgColor: "bg-green-100", href: "/admin/challan-verification" },
-  { title: "Tests Conducted", value: "850", icon: BookOpenCheck, color: "text-purple-500", bgColor: "bg-purple-100", href: "/admin/test-centers" },
+  { title: "Tests Conducted", value: "850", icon: BookOpenCheck, color: "text-teal-500", bgColor: "bg-teal-100", href: "/admin/test-results" },
 ];
 
 const quickActions = [
  { title: "View All Applications", href: "/admin/applications", icon: Users },
  { title: "Verify Challans", href: "/admin/challan-verification", icon: FileCheck2 },
- { title: "Manage Test Centers", href: "/admin/test-centers", icon: Briefcase },
- { title: "Generate Offer Letters", href: "/admin/offer-letters", icon: FileText },
+ { title: "Manage Programs", href: "/admin/programs", icon: GraduationCap },
+ { title: "Generate Merit Lists", href: "/admin/merit-lists", icon: ListOrdered },
+ { title: "Issue Offer Letters", href: "/admin/offer-letters", icon: FileText },
+ { title: "Assign Roll Numbers", href: "/admin/roll-numbers", icon: Contact },
+ { title: "Admission Settings", href: "/admin/settings", icon: Settings },
+ { title: "View System Logs", href: "/admin/system-logs", icon: ScrollText },
 ];
+
+const notifications = [
+    { id: "1", text: "New batch of 50 applications received for Fall 2024.", time: "10 mins ago", type: "info" },
+    { id: "2", text: "AI flagged 3 challans for manual review.", time: "1 hour ago", type: "warning" },
+    { id: "3", text: "System maintenance scheduled for tonight at 2 AM.", time: "3 hours ago", type: "alert" },
+];
+
 
 export default function AdminDashboardPage() {
   return (
     <div className="space-y-8">
-      <h1 className="text-3xl font-headline font-semibold text-primary">Admin Dashboard</h1>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <h1 className="text-3xl font-headline font-semibold text-primary">Admin Dashboard</h1>
+        <Button variant="outline">Download Summary Report (PDF)</Button>
+      </div>
+      
 
       {/* Overview Stats */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         {overviewStats.map(stat => (
           <Link href={stat.href} key={stat.title}>
-            <Card className="shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer">
+            <Card className="shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer bg-card">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
                 <div className={`p-2 rounded-full ${stat.bgColor}`}>
@@ -46,9 +64,9 @@ export default function AdminDashboardPage() {
         ))}
       </div>
 
-      {/* Quick Actions & Recent Activity */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card className="shadow-lg">
+      {/* Quick Actions & Notifications */}
+      <div className="grid gap-6 md:grid-cols-3">
+        <Card className="shadow-lg md:col-span-2 bg-card">
           <CardHeader>
             <CardTitle className="text-xl font-semibold text-primary">Quick Actions</CardTitle>
           </CardHeader>
@@ -64,21 +82,15 @@ export default function AdminDashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-lg">
+        <Card className="shadow-lg bg-card">
           <CardHeader>
-            <CardTitle className="text-xl font-semibold text-primary">Recent Activity</CardTitle>
-            <CardDescription>Latest system events and actions.</CardDescription>
+            <CardTitle className="text-xl font-semibold text-primary">Notifications &amp; Alerts</CardTitle>
+            <CardDescription>Recent system events and actions.</CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="space-y-3">
-              {/* Placeholder Activity Items */}
-              {[
-                { text: "New application received from John Doe.", time: "5 mins ago" },
-                { text: "Challan #1203 verified by Finance Officer.", time: "15 mins ago" },
-                { text: "Test slot booked for Application #AP2024005.", time: "1 hour ago" },
-                { text: "Offer letter generated for Jane Smith.", time: "3 hours ago" },
-              ].map((activity, idx) => (
-                <li key={idx} className="flex items-start gap-3">
+              {notifications.map((activity) => (
+                <li key={activity.id} className="flex items-start gap-3 p-2 rounded-md bg-primary/5 border border-primary/20">
                   <Activity className="h-5 w-5 text-muted-foreground mt-1 shrink-0" />
                   <div>
                     <p className="text-sm text-card-foreground">{activity.text}</p>
@@ -86,22 +98,13 @@ export default function AdminDashboardPage() {
                   </div>
                 </li>
               ))}
+               {notifications.length === 0 && <p className="text-sm text-muted-foreground">No new notifications.</p>}
             </ul>
           </CardContent>
         </Card>
       </div>
       
-      {/* Placeholder for Charts/Analytics */}
-      <Card className="shadow-lg">
-        <CardHeader>
-          <CardTitle className="text-xl font-semibold text-primary">Application Analytics</CardTitle>
-          <CardDescription>Overview of application trends (Placeholder).</CardDescription>
-        </CardHeader>
-        <CardContent className="h-64 flex items-center justify-center bg-muted/30 rounded-b-lg">
-           <BarChart3 className="h-16 w-16 text-muted-foreground" />
-           <p className="ml-4 text-muted-foreground">Analytics chart will be displayed here.</p>
-        </CardContent>
-      </Card>
+      <PlaceholderChart title="Application Trends (Placeholder)" description="Monthly application submissions and approval rates." className="shadow-lg bg-card"/>
 
     </div>
   );

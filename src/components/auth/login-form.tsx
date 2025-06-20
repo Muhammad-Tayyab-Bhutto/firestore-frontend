@@ -1,3 +1,4 @@
+
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,13 +18,14 @@ import { LoginSchema, type LoginFormData } from "@/lib/schemas";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Eye, EyeOff, LogIn } from "lucide-react";
-import React from "react";
+import { Eye, EyeOff, LogIn, ShieldQuestion } from "lucide-react";
+import React, { useState } from "react";
 
 export function LoginForm() {
   const { toast } = useToast();
   const router = useRouter();
-  const [showPassword, setShowPassword] = React.useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [otpSent, setOtpSent] = useState(false); // Placeholder for OTP logic
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(LoginSchema),
@@ -31,18 +33,31 @@ export function LoginForm() {
       email: "",
       cnic: "",
       password: "",
+      otp: "",
     },
   });
 
   function onSubmit(data: LoginFormData) {
-    // Placeholder for actual login logic
     console.log("Login data:", data);
+    
+    if (!otpSent) {
+      // Placeholder: Simulate sending OTP
+      setOtpSent(true);
+      toast({
+        title: "OTP Sent",
+        description: "An OTP has been sent to your registered email/phone (placeholder).",
+      });
+      // In a real app, you wouldn't proceed to dashboard here.
+      // You'd wait for OTP verification.
+      return;
+    }
+
+    // Placeholder for actual login logic with OTP
     toast({
       title: "Login Attempted",
-      description: "Login functionality is a placeholder.",
+      description: "Login functionality with OTP is a placeholder.",
     });
     // Simulate successful login for navigation
-    // In a real app, this would depend on successful Firebase Auth
     router.push("/dashboard"); 
   }
 
@@ -55,64 +70,93 @@ export function LoginForm() {
       <CardContent>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <FormField
-              control={form.control}
-              name="email"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Email Address</FormLabel>
-                  <FormControl>
-                    <Input placeholder="you@example.com" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="cnic"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>CNIC (National ID)</FormLabel>
-                  <FormControl>
-                    <Input placeholder="XXXXX-XXXXXXX-X" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="password"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Password</FormLabel>
-                  <FormControl>
-                    <div className="relative">
-                      <Input type={showPassword ? "text" : "password"} placeholder="••••••••" {...field} />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                        onClick={() => setShowPassword(!showPassword)}
-                        aria-label={showPassword ? "Hide password" : "Show password"}
-                      >
-                        {showPassword ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <Button type="submit" className="w-full bg-primary hover:bg-primary/90">
-              <LogIn className="mr-2 h-4 w-4" /> Login
-            </Button>
+            {!otpSent ? (
+              <>
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email Address</FormLabel>
+                      <FormControl>
+                        <Input placeholder="you@example.com" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="cnic"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>CNIC (National ID)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="XXXXX-XXXXXXX-X" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="password"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Password</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <Input type={showPassword ? "text" : "password"} placeholder="••••••••" {...field} />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                            onClick={() => setShowPassword(!showPassword)}
+                            aria-label={showPassword ? "Hide password" : "Show password"}
+                          >
+                            {showPassword ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <Button type="submit" className="w-full bg-primary hover:bg-primary/90">
+                  <LogIn className="mr-2 h-4 w-4" /> Proceed to OTP
+                </Button>
+              </>
+            ) : (
+              <>
+                <FormField
+                  control={form.control}
+                  name="otp"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Enter OTP</FormLabel>
+                      <FormControl>
+                        <Input placeholder="6-digit OTP" {...field} maxLength={6} />
+                      </FormControl>
+                      <FormMessage />
+                      <FormDescription>
+                        An OTP was sent to your registered email/phone.
+                      </FormDescription>
+                    </FormItem>
+                  )}
+                />
+                <Button type="submit" className="w-full bg-accent hover:bg-accent/90 text-accent-foreground">
+                  <ShieldQuestion className="mr-2 h-4 w-4" /> Verify OTP &amp; Login
+                </Button>
+                 <Button variant="link" onClick={() => setOtpSent(false)} className="w-full">
+                  Back to Login Details
+                </Button>
+              </>
+            )}
           </form>
         </Form>
         <p className="mt-6 text-center text-sm text-muted-foreground">

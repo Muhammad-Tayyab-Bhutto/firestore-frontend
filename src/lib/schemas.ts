@@ -2,11 +2,13 @@ import { z } from 'zod';
 
 // CNIC format regex (Pakistan): 5 digits - 7 digits - 1 digit
 const cnicRegex = /^[0-9]{5}-[0-9]{7}-[0-9]{1}$/;
+const otpRegex = /^[0-9]{6}$/; // 6-digit OTP
 
 export const LoginSchema = z.object({
   email: z.string().email({ message: "Invalid email address." }),
   cnic: z.string().regex(cnicRegex, { message: "Invalid CNIC format. Use XXXXX-XXXXXXX-X." }),
-  password: z.string().min(1, { message: "Password is required." }), // Assuming password is used for login
+  password: z.string().min(1, { message: "Password is required." }),
+  otp: z.string().regex(otpRegex, { message: "Enter 6-digit OTP." }).optional(), // Optional for initial login, required if 2FA enabled
 });
 
 export type LoginFormData = z.infer<typeof LoginSchema>;
@@ -16,6 +18,7 @@ export const RegisterSchema = z.object({
   cnic: z.string().regex(cnicRegex, { message: "Invalid CNIC format. Use XXXXX-XXXXXXX-X." }),
   password: z.string().min(8, { message: "Password must be at least 8 characters." }),
   confirmPassword: z.string(),
+  otp: z.string().regex(otpRegex, { message: "Enter 6-digit OTP sent to your email." }).optional(), // For email verification step
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Passwords do not match.",
   path: ["confirmPassword"], // Path to field causing the error
