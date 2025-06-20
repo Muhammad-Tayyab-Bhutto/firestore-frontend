@@ -45,7 +45,6 @@ export default function TakeTestPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
 
-  // Refs for state values to stabilize callbacks and useEffects
   const [testStarted, _setTestStarted] = useState(false);
   const testStartedRef = useRef(testStarted);
   const setTestStarted = (val: boolean) => {
@@ -69,7 +68,7 @@ export default function TakeTestPage() {
   
   const [answers, _setAnswers] = useState<Record<string, string>>({});
   const answersRef = useRef(answers);
-  const setAnswers = (updater: React.SetStateAction<Record<string, string>>) => {
+  const setAnswersState = (updater: React.SetStateAction<Record<string, string>>) => {
     const newAnswers = typeof updater === 'function' ? updater(answersRef.current) : updater;
     answersRef.current = newAnswers;
     _setAnswers(newAnswers);
@@ -77,7 +76,7 @@ export default function TakeTestPage() {
 
   const [shuffledQuestions, _setShuffledQuestions] = useState<TestQuestion[]>([]);
   const shuffledQuestionsRef = useRef(shuffledQuestions);
-  const setShuffledQuestions = (newQuestions: TestQuestion[]) => {
+  const setShuffledQuestionsState = (newQuestions: TestQuestion[]) => {
     shuffledQuestionsRef.current = newQuestions;
     _setShuffledQuestions(newQuestions);
   };
@@ -89,7 +88,6 @@ export default function TakeTestPage() {
       violationDialogStateRef.current = newState;
       _setViolationDialogState(newState);
   };
-
 
   const requestPermissions = useCallback(async () => {
     try {
@@ -149,7 +147,9 @@ export default function TakeTestPage() {
         }
     } catch (err) {
         console.warn("Fullscreen request failed:", err instanceof Error ? err.message : err);
-        toast({variant: 'destructive', title: "Fullscreen Error", description: "Could not enter fullscreen mode. This is required for the test."})
+        if (testStartedRef.current && !testSubmittedRef.current) { // Only toast if test is active
+            toast({variant: 'destructive', title: "Fullscreen Error", description: "Could not enter fullscreen mode automatically. Please try manually enabling it (usually F11) or ensure your browser allows it. This is required for the test."})
+        }
     }
   }, [toast]);
 
@@ -243,7 +243,6 @@ export default function TakeTestPage() {
     return () => clearInterval(timerId);
   }, [timeLeft, handleSubmitTest, toast]); 
   
-  // Proctoring Event Handlers - stable due to useCallback and refs
   const handleBeforeUnload = useCallback((e: BeforeUnloadEvent) => {
       if (!testStartedRef.current || testSubmittedRef.current || violationDialogStateRef.current.isOpen) return;
       e.preventDefault();
@@ -263,6 +262,11 @@ export default function TakeTestPage() {
   const handleWindowBlur = useCallback(() => {
       if (testStartedRef.current && !testSubmittedRef.current && !isSubmittingRef.current && !violationDialogStateRef.current.isOpen) {
          if (document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML')) {
+            // Check if an AlertDialog (our own) is the active element to prevent false positives
+            const activeDialog = document.querySelector('[role="alertdialog"]');
+            if (activeDialog && activeDialog.contains(document.activeElement)) {
+                return;
+            }
             const reason = "Test window lost focus. This is a violation.";
             showViolationWarningDialog(
                 reason, 
@@ -278,7 +282,12 @@ export default function TakeTestPage() {
           showViolationWarningDialog(
             reason, 
             () => handleSubmitTest(true, "Fullscreen mode exited"),
-            async () => { if(testStartedRef.current && !testSubmittedRef.current && !document.fullscreenElement) await enterFullScreen(); } 
+            async () => { 
+                // Attempt to re-enter fullscreen if test is still active
+                if(testStartedRef.current && !testSubmittedRef.current && !document.fullscreenElement) {
+                    await enterFullScreen(); 
+                }
+            } 
           );
       }
   }, [handleSubmitTest, showViolationWarningDialog, enterFullScreen]);
@@ -293,76 +302,82 @@ export default function TakeTestPage() {
 
     const keyLower = e.key.toLowerCase();
 
+    // Allow Escape key to exit fullscreen (it will be caught by fullscreenchange listener)
     if (e.key === 'Escape' && document.fullscreenElement) {
-        return; // Do not preventDefault, let fullscreenchange handler catch it.
+        return; 
     }
     
-    // Ctrl+Shift combinations
+    // Common Ctrl/Cmd shortcuts
+    if ((e.ctrlKey || e.metaKey) && 
+        ['a', 'c', 'v', 'x', 'z', 'y', 's', 'p', 'r', 't', 'n', 'w', 'f', 'h', 'o', 'l', 'k', 'g', 'd', 'b', 'm', 'q', '+', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(keyLower)) {
+      e.preventDefault(); return;
+    }
+    // Ctrl+Shift combinations (like dev tools)
     if (e.ctrlKey && e.shiftKey && ['i', 'j', 'c', 'k', 'l', 'e'].includes(keyLower)) {
       e.preventDefault(); return;
     }
-    // Ctrl combinations 
-    if (e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && 
-        ['r', 't', 'n', 'p', 's', 'c', 'v', 'x', 'z', 'y', 'a', 'u', 'w', 'f', 'h', 'o', 'l', 'k', 'g', 'd', 'b', 'm', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '-'].includes(keyLower)) {
+    // Alt key combinations (Alt+Tab is OS level, Alt+F4, Alt+arrows)
+    if (e.altKey && (e.key === 'Tab' || keyLower === 'f4' || e.key.startsWith('Arrow') || e.key === 'Home')) {
       e.preventDefault(); return;
     }
-    // Meta key (Cmd on Mac, Win key on Windows) combinations
-    if (e.metaKey && ['r', 't', 'n', 'w', 'q', 'p', 's', 'h', 'l', 'f', 'g', 'o', 'u', 'c', 'v', 'x', 'z', 'y', 'a', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '-'].includes(keyLower)) {
-      e.preventDefault(); return;
+    // Function keys (F1-F12)
+    if (e.key.startsWith('F') && !isNaN(parseInt(e.key.substring(1), 10))) {
+       e.preventDefault(); return;
     }
-    // Alt key combinations (Alt+Tab is OS-level, hard to block reliably)
-    if (e.altKey) {
-      if (e.key === 'Tab' || keyLower === 'f4' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home') { 
-        e.preventDefault(); return;
-      }
-    }
-    // Function keys & others
-    const fKeys = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'];
-    if (fKeys.includes(e.key) || ['PrintScreen', 'ContextMenu', 'ScrollLock', 'Pause', 'Insert', 'Home', 'End', 'PageUp', 'PageDown', 'Delete', 'Help'].includes(e.key) ) {
+    // Other problematic keys
+    const otherBlockedKeys = ['PrintScreen', 'ContextMenu', 'ScrollLock', 'Pause', 'Insert', 'Home', 'End', 'PageUp', 'PageDown', 'Delete', 'Help'];
+    if (otherBlockedKeys.includes(e.key) ) {
        e.preventDefault(); return;
     }
   }, []); 
 
 
   useEffect(() => {
-    if (!testStarted || testSubmitted || violationDialogState.isOpen) {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleWindowBlur);
-      document.removeEventListener('fullscreenchange', handleFullscreenChange); 
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange); 
-      document.removeEventListener('mozfullscreenchange', handleFullscreenChange); 
-      document.removeEventListener('MSFullscreenChange', handleFullscreenChange); 
-      document.removeEventListener('contextmenu', disableContextMenu);
-      document.removeEventListener('keydown', disableShortcuts);
-      return;
+    if (testStarted && !testSubmitted && !violationDialogState.isOpen) {
+      enterFullScreen(); // Attempt to enter fullscreen when test starts/resumes
+      
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      window.addEventListener('blur', handleWindowBlur);
+      document.addEventListener('fullscreenchange', handleFullscreenChange); 
+      document.addEventListener('webkitfullscreenchange', handleFullscreenChange); 
+      document.addEventListener('mozfullscreenchange', handleFullscreenChange); 
+      document.addEventListener('MSFullscreenChange', handleFullscreenChange); 
+      document.addEventListener('contextmenu', disableContextMenu);
+      document.addEventListener('keydown', disableShortcuts, { capture: true }); // Use capture phase
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('blur', handleWindowBlur);
+        document.removeEventListener('fullscreenchange', handleFullscreenChange); 
+        document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+        document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+        document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+        document.removeEventListener('contextmenu', disableContextMenu);
+        document.removeEventListener('keydown', disableShortcuts, { capture: true });
+      };
+    } else if (!testStarted || testSubmitted || violationDialogState.isOpen) {
+        // Cleanup if test is not active, or submitted, or a dialog is open
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('blur', handleWindowBlur);
+        document.removeEventListener('fullscreenchange', handleFullscreenChange);
+        document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+        document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+        document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+        document.removeEventListener('contextmenu', disableContextMenu);
+        document.removeEventListener('keydown', disableShortcuts, { capture: true });
+        
+        // If test is submitted and still in fullscreen, exit
+        if (testSubmitted && document.fullscreenElement) {
+            exitFullScreen();
+        }
     }
-    
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleWindowBlur);
-    document.addEventListener('fullscreenchange', handleFullscreenChange); 
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange); 
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange); 
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange); 
-    document.addEventListener('contextmenu', disableContextMenu);
-    document.addEventListener('keydown', disableShortcuts);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleWindowBlur);
-      document.removeEventListener('fullscreenchange', handleFullscreenChange); 
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
-      document.removeEventListener('contextmenu', disableContextMenu);
-      document.removeEventListener('keydown', disableShortcuts);
-    };
-  }, [testStarted, testSubmitted, violationDialogState.isOpen, handleBeforeUnload, handleVisibilityChange, handleWindowBlur, handleFullscreenChange, disableContextMenu, disableShortcuts]);
+  }, [testStarted, testSubmitted, violationDialogState.isOpen, handleBeforeUnload, handleVisibilityChange, handleWindowBlur, handleFullscreenChange, disableContextMenu, disableShortcuts, enterFullScreen, exitFullScreen]);
 
 
   useEffect(() => {
+    // Component unmount cleanup
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -374,8 +389,18 @@ export default function TakeTestPage() {
       if (document.fullscreenElement) {
          exitFullScreen();
       }
+       // Clear all event listeners on unmount as a final safety measure
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+      document.removeEventListener('contextmenu', disableContextMenu);
+      document.removeEventListener('keydown', disableShortcuts, { capture: true });
     };
-  }, [exitFullScreen]);
+  }, [exitFullScreen, handleBeforeUnload, handleVisibilityChange, handleWindowBlur, handleFullscreenChange, disableContextMenu, disableShortcuts]);
 
 
   const handleStartTest = async () => {
@@ -402,20 +427,20 @@ export default function TakeTestPage() {
       const { questions: fetchedQuestions, instructions } = await getTestQuestions({ testId: 'SAMPLE_TEST_001' }); 
       
       const array = [...fetchedQuestions];
+      // Fisher-Yates shuffle
       for (let i = array.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [array[i], array[j]] = [array[j], array[i]];
       }
-      setShuffledQuestions(array);   
+      setShuffledQuestionsState(array);   
       setTestInstructions(instructions || "No specific instructions provided. Follow general test guidelines.");
       
       setCurrentQuestionIndex(0);
-      setAnswers({}); 
+      setAnswersState({}); 
       setTimeLeft(INITIAL_TIME_LEFT_SECONDS); 
       setSubmissionDetails(null);
       setTestSubmitted(false); 
-      setTestStarted(true);   
-      await enterFullScreen();      
+      setTestStarted(true); // This will trigger the useEffect to enter fullscreen and add listeners
       
     } catch (error) {
       toast({ variant: 'destructive', title: "Failed to Load Test", description: "Could not fetch test questions. Please try again."});
@@ -435,7 +460,7 @@ export default function TakeTestPage() {
 
   const handleAnswerChange = (questionId: number, answer: string) => {
     if (testSubmittedRef.current || isSubmittingRef.current) return;
-    setAnswers(prev => ({ ...prev, [questionId.toString()]: answer }));
+    setAnswersState(prev => ({ ...prev, [questionId.toString()]: answer }));
   };
   
   if ((hasCameraPermission === null || hasMicPermission === null) && !testStartedRef.current && !streamRef.current) {
@@ -553,35 +578,36 @@ export default function TakeTestPage() {
             </Button>
           </CardFooter>
         </Card>
-        {violationDialogState.isOpen && (
-          <AlertDialog open={violationDialogState.isOpen} onOpenChange={(open) => {
-            if (!open) { 
-                if (violationDialogState.onCancel) violationDialogState.onCancel();
-                else setViolationDialogState(prev => ({ ...prev, isOpen: false, reason: '', onConfirm: () => {}, onCancel: undefined }));
+        
+        {/* This AlertDialog is for pre-test warnings or critical errors, not proctoring violations during the test */}
+        <AlertDialog open={violationDialogState.isOpen && !testStartedRef.current} onOpenChange={(open) => {
+            if (!open && violationDialogState.onCancel) {
+                 violationDialogState.onCancel(); // Call onCancel if dialog is closed by means other than buttons
+            } else if (!open) {
+                setViolationDialogState(prev => ({ ...prev, isOpen: false }));
             }
-          }}>
+        }}>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle className="flex items-center gap-2"><AlertTriangle className="text-destructive"/> Proctoring Alert</AlertDialogTitle>
+                <AlertDialogTitle className="flex items-center gap-2"><AlertTriangle className="text-destructive"/> System Alert</AlertDialogTitle>
                 <AlertDialogDescription>
                   {violationDialogState.reason}
-                  <br/><br/>
-                  Confirming this action will result in your test being submitted immediately and may be flagged for review.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel onClick={violationDialogState.onCancel}>Cancel / Go Back</AlertDialogCancel>
-                <AlertDialogAction onClick={violationDialogState.onConfirm} className="bg-destructive hover:bg-destructive/90">Acknowledge & Submit Test</AlertDialogAction>
+                {violationDialogState.onCancel && <AlertDialogCancel onClick={violationDialogState.onCancel}>Cancel</AlertDialogCancel>}
+                <AlertDialogAction onClick={violationDialogState.onConfirm}>OK</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-        )}
+
       </div>
     );
   }
 
+  // Test in progress UI
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] max-h-screen bg-background">
+    <div className="flex flex-col h-[calc(100vh-0rem)] md:h-[calc(100vh-4rem)] max-h-screen bg-background"> {/* Adjusted height for mobile vs desktop */}
       <header className="bg-primary text-primary-foreground p-3 shadow-md flex justify-between items-center shrink-0">
         <div className="flex items-center gap-2">
           <BookOpen className="h-6 w-6" />
@@ -593,8 +619,9 @@ export default function TakeTestPage() {
         </div>
       </header>
 
-      <div className="flex-grow grid grid-cols-12 gap-4 p-4 overflow-hidden">
-        <Card className="col-span-12 md:col-span-2 shadow-lg flex flex-col">
+      <div className="flex-grow grid grid-cols-12 gap-0 md:gap-4 p-0 md:p-4 overflow-hidden">
+        {/* Question List Sidebar (Hidden on small screens initially, can be toggled) */}
+        <Card className="col-span-12 md:col-span-2 shadow-lg flex flex-col hidden md:flex"> {/* Hidden on small screens */}
           <CardHeader className="p-3 border-b">
             <CardTitle className="text-base flex items-center gap-2"><ListChecks className="h-5 w-5 text-primary"/> Questions</CardTitle>
           </CardHeader>
@@ -616,6 +643,7 @@ export default function TakeTestPage() {
           </ScrollArea>
         </Card>
         
+        {/* Main Question Area */}
         <Card className="col-span-12 md:col-span-7 shadow-lg flex flex-col overflow-hidden">
           <CardHeader className="border-b p-3">
             <CardTitle className="text-lg">Question {currentQuestionIndex + 1} of {shuffledQuestionsRef.current.length}</CardTitle>
@@ -686,21 +714,22 @@ export default function TakeTestPage() {
                 onClick={() => {
                     showViolationWarningDialog(
                         "Are you sure you want to submit your test? This action cannot be undone.",
-                        () => handleSubmitTest(false, "Manual submission"),
-                        () => {} 
+                        () => handleSubmitTest(false, "Manual submission"), // onConfirm
+                        () => {} // onCancel
                     )
                 }} 
                 className="bg-green-600 hover:bg-green-700 text-white" 
                 disabled={isSubmittingRef.current || testSubmittedRef.current || violationDialogStateRef.current.isOpen}
               >
-                {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4"/>}
-                {isSubmitting ? "Submitting..." : "Submit Test"}
+                {isSubmittingRef.current ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4"/>}
+                {isSubmittingRef.current ? "Submitting..." : "Submit Test"}
               </Button>
             )}
           </CardFooter>
         </Card>
 
-        <div className="col-span-12 md:col-span-3 space-y-4 flex flex-col">
+        {/* Video and Security Status (Hidden on small screens initially) */}
+        <div className="col-span-12 md:col-span-3 space-y-0 md:space-y-4 flex flex-col hidden md:flex"> {/* Hidden on small screens */}
           <Card className="shadow-md flex-none">
             <CardHeader className="p-3 pb-1">
               <CardTitle className="text-base flex items-center gap-2"><Video className="h-5 w-5 text-primary"/> Your Video</CardTitle>
@@ -727,12 +756,15 @@ export default function TakeTestPage() {
           </Card>
         </div>
       </div>
-      {violationDialogState.isOpen && (
+      
+      {/* Violation Dialog (only when test is started) */}
+      {violationDialogState.isOpen && testStartedRef.current && (
          <AlertDialog open={violationDialogState.isOpen} onOpenChange={(open) => {
-            if (!open) { 
+            if (!open) { // If dialog is closed by means other than buttons (e.g. Escape key on dialog itself, or overlay click)
                 if (violationDialogState.onCancel) {
-                    violationDialogState.onCancel();
+                    violationDialogState.onCancel(); // Trigger the cancel action if defined
                 } else {
+                     // Default close action if no specific onCancel (e.g. for submit confirmation)
                     setViolationDialogState(prev => ({ ...prev, isOpen: false, reason: '', onConfirm: () => {}, onCancel: undefined }));
                 }
             }
@@ -743,12 +775,24 @@ export default function TakeTestPage() {
               <AlertDialogDescription className="py-4">
                 {violationDialogState.reason}
                 <br/><br/>
-                Confirming this action will result in your test being submitted immediately and may be flagged for review.
+                {violationDialogState.reason.toLowerCase().includes("submit your test") 
+                    ? "This action cannot be undone." 
+                    : "Confirming this action will result in your test being submitted immediately and may be flagged for review."
+                }
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel onClick={violationDialogState.onCancel}>Cancel / Go Back</AlertDialogCancel>
-              <AlertDialogAction onClick={violationDialogState.onConfirm} className="bg-destructive hover:bg-destructive/90">Acknowledge &amp; Submit Test</AlertDialogAction>
+              <AlertDialogCancel onClick={() => {
+                if (violationDialogState.onCancel) violationDialogState.onCancel();
+                else setViolationDialogState(prev => ({ ...prev, isOpen: false, reason: '', onConfirm: () => {}, onCancel: undefined }));
+              }}>
+                {violationDialogState.reason.toLowerCase().includes("submit your test") ? "Cancel" : "Cancel / Go Back"}
+              </AlertDialogCancel>
+              <AlertDialogAction 
+                onClick={violationDialogState.onConfirm} 
+                className={violationDialogState.reason.toLowerCase().includes("submit your test") ? "bg-green-600 hover:bg-green-700" : "bg-destructive hover:bg-destructive/90"}>
+                {violationDialogState.reason.toLowerCase().includes("submit your test") ? "Confirm Submission" : "Acknowledge & Submit Test"}
+              </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -756,5 +800,3 @@ export default function TakeTestPage() {
     </div>
   );
 }
-
-    
