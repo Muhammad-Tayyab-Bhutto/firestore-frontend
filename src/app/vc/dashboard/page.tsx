@@ -1,6 +1,6 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { BarChart3, Users, University, FileCheck, TrendingUp, Bell, FileSpreadsheet, MessageSquare, ShieldAlert, Settings2, Activity } from "lucide-react"; 
+import { BarChart3, Users, University, FileCheck, TrendingUp, Bell, FileSpreadsheet, MessageSquare, ShieldAlert, Settings2, Activity, Download, ListOrdered } from "lucide-react"; 
 import type { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { PlaceholderChart } from "@/components/common/placeholder-chart";
@@ -66,7 +66,7 @@ export default function VcDashboardPage() {
                         <p className="text-xs text-muted-foreground mb-1">{notif.message}</p>
                         <div className="flex justify-between items-center">
                             <p className="text-xs text-muted-foreground/80">{notif.time}</p>
-                            {notif.type === 'action' && <Button size="xs" variant="outline" href={notif.href}>Review</Button>}
+                            {notif.type === 'action' && <Button size="xs" variant="outline" /*href={notif.href}*/>Review</Button>}
                         </div>
                     </div>
                 ))}
