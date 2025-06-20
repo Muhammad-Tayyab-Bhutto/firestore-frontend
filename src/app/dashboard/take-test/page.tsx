@@ -29,63 +29,65 @@ interface ViolationDialogState {
   onCancel?: () => void;
 }
 
+const INITIAL_TIME_LEFT_SECONDS = 120 * 60; // 120 minutes
+
 export default function TakeTestPage() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
-  const [testStarted, setTestStartedState] = useState(false); // Renamed for clarity
+  
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(INITIAL_TIME_LEFT_SECONDS); 
+  const [testInstructions, setTestInstructions] = useState<string | null>(null);
   const [submissionDetails, setSubmissionDetails] = useState<SubmitTestAnswersOutput | null>(null);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(120 * 60); 
-  const [shuffledQuestions, setShuffledQuestionsState] = useState<TestQuestion[]>([]); // Renamed
-  const [answers, setAnswersState] = useState<Record<string, string>>({}); // Renamed
-  const [testInstructions, setTestInstructions] = useState<string | null>(null);
-
-  const [violationDialogState, setViolationDialogState] = useState<ViolationDialogState>({
-    isOpen: false,
-    reason: '',
-    onConfirm: () => {},
-    onCancel: undefined,
-  });
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
 
-  // Refs for state values to stabilize callbacks
+  // Refs for state values to stabilize callbacks and useEffects
+  const [testStarted, _setTestStarted] = useState(false);
   const testStartedRef = useRef(testStarted);
   const setTestStarted = (val: boolean) => {
-    setTestStartedState(val);
     testStartedRef.current = val;
+    _setTestStarted(val);
   };
 
-  const [testSubmitted, setTestSubmittedState] = useState(false);
+  const [testSubmitted, _setTestSubmitted] = useState(false);
   const testSubmittedRef = useRef(testSubmitted);
   const setTestSubmitted = (val: boolean) => {
-    setTestSubmittedState(val);
     testSubmittedRef.current = val;
+    _setTestSubmitted(val);
   };
 
-  const [isSubmitting, setIsSubmittingState] = useState(false);
+  const [isSubmitting, _setIsSubmitting] = useState(false);
   const isSubmittingRef = useRef(isSubmitting);
   const setIsSubmitting = (val: boolean) => {
-    setIsSubmittingState(val);
     isSubmittingRef.current = val;
+    _setIsSubmitting(val);
   };
   
+  const [answers, _setAnswers] = useState<Record<string, string>>({});
   const answersRef = useRef(answers);
   const setAnswers = (updater: React.SetStateAction<Record<string, string>>) => {
-    setAnswersState(prevAnswers => {
-      const newAnswers = typeof updater === 'function' ? updater(prevAnswers) : updater;
-      answersRef.current = newAnswers;
-      return newAnswers;
-    });
+    const newAnswers = typeof updater === 'function' ? updater(answersRef.current) : updater;
+    answersRef.current = newAnswers;
+    _setAnswers(newAnswers);
   };
 
+  const [shuffledQuestions, _setShuffledQuestions] = useState<TestQuestion[]>([]);
   const shuffledQuestionsRef = useRef(shuffledQuestions);
-   const setShuffledQuestions = (newQuestions: TestQuestion[]) => {
-    setShuffledQuestionsState(newQuestions);
+  const setShuffledQuestions = (newQuestions: TestQuestion[]) => {
     shuffledQuestionsRef.current = newQuestions;
+    _setShuffledQuestions(newQuestions);
+  };
+  
+  const [violationDialogState, _setViolationDialogState] = useState<ViolationDialogState>({ isOpen: false, reason: '', onConfirm: () => {}, onCancel: undefined });
+  const violationDialogStateRef = useRef(violationDialogState);
+  const setViolationDialogState = (updater: React.SetStateAction<ViolationDialogState>) => {
+      const newState = typeof updater === 'function' ? updater(violationDialogStateRef.current) : updater;
+      violationDialogStateRef.current = newState;
+      _setViolationDialogState(newState);
   };
 
 
@@ -139,7 +141,7 @@ export default function TakeTestPage() {
     const elem = document.documentElement;
     try {
         if (elem.requestFullscreen) {
-            await elem.requestFullscreen();
+            await elem.requestFullscreen({ navigationUI: "hide" });
         } else if ((elem as any).webkitRequestFullscreen) { 
             await (elem as any).webkitRequestFullscreen();
         } else if ((elem as any).msRequestFullscreen) { 
@@ -147,8 +149,6 @@ export default function TakeTestPage() {
         }
     } catch (err) {
         console.warn("Fullscreen request failed:", err instanceof Error ? err.message : err);
-        // If fullscreen fails, it's a critical issue for proctoring.
-        // Consider showing a specific error to the user or preventing test start.
         toast({variant: 'destructive', title: "Fullscreen Error", description: "Could not enter fullscreen mode. This is required for the test."})
     }
   }, [toast]);
@@ -209,11 +209,11 @@ export default function TakeTestPage() {
     } finally {
         setIsSubmitting(false);
     }
-  }, [toast, exitFullScreen, setIsSubmitting, setSubmissionDetails, setTestStarted, setTestSubmitted]);
+  }, [toast, exitFullScreen]);
 
 
   const showViolationWarningDialog = useCallback((reason: string, onConfirmAction: () => void, onCancelAction?: () => void) => {
-    if (isSubmittingRef.current || testSubmittedRef.current || violationDialogState.isOpen) return;
+    if (isSubmittingRef.current || testSubmittedRef.current || violationDialogStateRef.current.isOpen) return;
 
     setViolationDialogState({
       isOpen: true,
@@ -227,7 +227,7 @@ export default function TakeTestPage() {
         setViolationDialogState(prev => ({ ...prev, isOpen: false, reason: '', onConfirm: () => {}, onCancel: undefined }));
       }
     });
-  }, [violationDialogState.isOpen]);
+  }, []);
 
 
   useEffect(() => {
@@ -243,110 +243,89 @@ export default function TakeTestPage() {
     return () => clearInterval(timerId);
   }, [timeLeft, handleSubmitTest, toast]); 
   
+  // Proctoring Event Handlers - stable due to useCallback and refs
   const handleBeforeUnload = useCallback((e: BeforeUnloadEvent) => {
-      if (!testStartedRef.current || testSubmittedRef.current || violationDialogState.isOpen) return;
+      if (!testStartedRef.current || testSubmittedRef.current || violationDialogStateRef.current.isOpen) return;
       e.preventDefault();
       e.returnValue = 'Are you sure you want to leave? Your test progress might be lost and the test will be submitted.';
-  }, [violationDialogState.isOpen]);
+  }, []);
 
   const handleVisibilityChange = useCallback(() => {
-      if (document.hidden && testStartedRef.current && !testSubmittedRef.current && !isSubmittingRef.current && !violationDialogState.isOpen) {
+      if (document.hidden && testStartedRef.current && !testSubmittedRef.current && !isSubmittingRef.current && !violationDialogStateRef.current.isOpen) {
         const reason = "Tab switched or window minimized. This is a violation.";
         showViolationWarningDialog(
             reason, 
-            () => handleSubmitTest(true, "Tab switched or window minimized"),
-            () => {} 
+            () => handleSubmitTest(true, "Tab switched or window minimized")
         );
       }
-  }, [handleSubmitTest, showViolationWarningDialog, violationDialogState.isOpen]);
+  }, [handleSubmitTest, showViolationWarningDialog]);
     
   const handleWindowBlur = useCallback(() => {
-      if (testStartedRef.current && !testSubmittedRef.current && document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML') && !isSubmittingRef.current && !violationDialogState.isOpen) {
-         const reason = "Test window lost focus. This is a violation.";
-         showViolationWarningDialog(
-            reason, 
-            () => handleSubmitTest(true, "Test window lost focus"),
-            () => {}
-        );
+      if (testStartedRef.current && !testSubmittedRef.current && !isSubmittingRef.current && !violationDialogStateRef.current.isOpen) {
+         if (document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML')) {
+            const reason = "Test window lost focus. This is a violation.";
+            showViolationWarningDialog(
+                reason, 
+                () => handleSubmitTest(true, "Test window lost focus")
+            );
+         }
       }
-  }, [handleSubmitTest, showViolationWarningDialog, violationDialogState.isOpen]);
+  }, [handleSubmitTest, showViolationWarningDialog]);
 
   const handleFullscreenChange = useCallback(() => {
-      if (!document.fullscreenElement && testStartedRef.current && !testSubmittedRef.current && !isSubmittingRef.current && !violationDialogState.isOpen) {
+      if (!document.fullscreenElement && testStartedRef.current && !testSubmittedRef.current && !isSubmittingRef.current && !violationDialogStateRef.current.isOpen) {
           const reason = "Fullscreen mode exited. This is a violation.";
           showViolationWarningDialog(
             reason, 
             () => handleSubmitTest(true, "Fullscreen mode exited"),
-            async () => { if(testStartedRef.current && !testSubmittedRef.current) await enterFullScreen(); } 
+            async () => { if(testStartedRef.current && !testSubmittedRef.current && !document.fullscreenElement) await enterFullScreen(); } 
           );
       }
-  }, [handleSubmitTest, showViolationWarningDialog, enterFullScreen, violationDialogState.isOpen]);
+  }, [handleSubmitTest, showViolationWarningDialog, enterFullScreen]);
 
   const disableContextMenu = useCallback((e: MouseEvent) => {
-      if (!testStartedRef.current || testSubmittedRef.current || violationDialogState.isOpen) return;
+      if (!testStartedRef.current || testSubmittedRef.current || violationDialogStateRef.current.isOpen) return;
       e.preventDefault();
-  }, [violationDialogState.isOpen]);
+  }, []);
 
   const disableShortcuts = useCallback((e: KeyboardEvent) => {
-    if (!testStartedRef.current || testSubmittedRef.current || violationDialogState.isOpen) return;
+    if (!testStartedRef.current || testSubmittedRef.current || violationDialogStateRef.current.isOpen) return;
 
     const keyLower = e.key.toLowerCase();
 
-    // Ctrl+Shift combinations (e.g., DevTools, Task Manager on some OS)
-    // Common ones: Ctrl+Shift+I (DevTools), Ctrl+Shift+J (Console), Ctrl+Shift+C (Inspect Element)
-    if (e.ctrlKey && e.shiftKey && ['i', 'j', 'c'].includes(keyLower)) {
-      e.preventDefault(); return;
-    }
-
-    // Ctrl combinations (excluding Alt, Meta, Shift to be more specific)
-    if (e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && 
-        ['r', 't', 'n', 'p', 's', 'c', 'v', 'x', 'z', 'y', 'a', 'u', 'w', 'f', 'h', 'o', 'l', 'k', 'g', 'd', 'b', 'e', 'm'].includes(keyLower)) {
-        // r(refresh), t(new tab), n(new window), p(print), s(save), c(copy), v(paste), x(cut), z(undo), y(redo), a(select all), u(view source), w(close tab/window)
-        // f(find), h(history), o(open file), l(location bar), k(search bar), g(find again), d(bookmark), b(bookmarks), e(edit menu), m(mute tab)
-      e.preventDefault(); return;
-    }
-
-    // Meta key (Cmd on Mac, Win key on Windows) combinations
-    if (e.metaKey && ['r', 't', 'n', 'w', 'q', 'p', 's', 'h', 'l', 'f', 'g', 'o', 'u', 'c', 'v', 'x', 'z', 'y', 'a'].includes(keyLower)) {
-      // Similar to Ctrl, but for Mac primarily. q(quit), w(close window)
-      e.preventDefault(); return;
+    if (e.key === 'Escape' && document.fullscreenElement) {
+        return; // Do not preventDefault, let fullscreenchange handler catch it.
     }
     
-    // Alt key combinations
-    // IMPORTANT: Blocking Alt+Tab or Alt+F4 reliably is often impossible at the OS level.
-    // The browser might preventDefault on the event, but the OS may still act.
-    // We rely on focus/visibility change detection for these.
+    // Ctrl+Shift combinations
+    if (e.ctrlKey && e.shiftKey && ['i', 'j', 'c', 'k', 'l', 'e'].includes(keyLower)) {
+      e.preventDefault(); return;
+    }
+    // Ctrl combinations 
+    if (e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && 
+        ['r', 't', 'n', 'p', 's', 'c', 'v', 'x', 'z', 'y', 'a', 'u', 'w', 'f', 'h', 'o', 'l', 'k', 'g', 'd', 'b', 'm', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '-'].includes(keyLower)) {
+      e.preventDefault(); return;
+    }
+    // Meta key (Cmd on Mac, Win key on Windows) combinations
+    if (e.metaKey && ['r', 't', 'n', 'w', 'q', 'p', 's', 'h', 'l', 'f', 'g', 'o', 'u', 'c', 'v', 'x', 'z', 'y', 'a', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '-'].includes(keyLower)) {
+      e.preventDefault(); return;
+    }
+    // Alt key combinations (Alt+Tab is OS-level, hard to block reliably)
     if (e.altKey) {
-      if (e.key === 'Tab') { 
-        e.preventDefault(); // Attempt to block, OS likely overrides
-        return;
-      }
-      if (keyLower === 'f4') { 
-        e.preventDefault(); // Attempt to block, OS likely overrides
-        return;
-      }
-      // Block Alt + Left/Right arrow (browser navigation)
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home') { // Alt+Home
+      if (e.key === 'Tab' || keyLower === 'f4' || e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home') { 
         e.preventDefault(); return;
       }
     }
-
-    // Function keys (F1-F12) and other problematic single keys
+    // Function keys & others
     const fKeys = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'];
-    if (fKeys.includes(e.key) || e.key === 'PrintScreen' || e.key === 'ContextMenu' || e.key === 'ScrollLock' || e.key === 'Pause' || e.key === 'Insert' || e.key === 'Home' || e.key === 'End' || e.key === 'PageUp' || e.key === 'PageDown') {
+    if (fKeys.includes(e.key) || ['PrintScreen', 'ContextMenu', 'ScrollLock', 'Pause', 'Insert', 'Home', 'End', 'PageUp', 'PageDown', 'Delete', 'Help'].includes(e.key) ) {
        e.preventDefault(); return;
     }
-    
-    // If Escape is pressed while in fullscreen, we WANT it to exit fullscreen.
-    // The 'fullscreenchange' event will then trigger the violation dialog.
-    if (e.key === 'Escape' && document.fullscreenElement) {
-        return; // Do not prevent default, let fullscreenchange handler catch it.
-    }
+  }, []); 
 
-  }, [violationDialogState.isOpen]); // Dependencies: testStarted, testSubmitted, violationDialogState.isOpen (via refs)
 
- useEffect(() => {
-    if (!testStartedRef.current || testSubmittedRef.current || violationDialogState.isOpen) {
+  useEffect(() => {
+    if (!testStarted || testSubmitted || violationDialogState.isOpen) {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleWindowBlur);
@@ -380,13 +359,10 @@ export default function TakeTestPage() {
       document.removeEventListener('contextmenu', disableContextMenu);
       document.removeEventListener('keydown', disableShortcuts);
     };
-  // These callbacks are now stable due to their own useCallback or being simple functions.
-  // Key state refs (testStartedRef, testSubmittedRef, violationDialogState.isOpen) are checked inside callbacks.
   }, [testStarted, testSubmitted, violationDialogState.isOpen, handleBeforeUnload, handleVisibilityChange, handleWindowBlur, handleFullscreenChange, disableContextMenu, disableShortcuts]);
 
 
   useEffect(() => {
-    // Cleanup function for when the component unmounts
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -395,7 +371,6 @@ export default function TakeTestPage() {
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
-      // Attempt to exit fullscreen if component unmounts while test might be active
       if (document.fullscreenElement) {
          exitFullScreen();
       }
@@ -435,8 +410,8 @@ export default function TakeTestPage() {
       setTestInstructions(instructions || "No specific instructions provided. Follow general test guidelines.");
       
       setCurrentQuestionIndex(0);
-      setAnswers({}); // Resets answers
-      setTimeLeft(120 * 60); 
+      setAnswers({}); 
+      setTimeLeft(INITIAL_TIME_LEFT_SECONDS); 
       setSubmissionDetails(null);
       setTestSubmitted(false); 
       setTestStarted(true);   
@@ -631,8 +606,8 @@ export default function TakeTestPage() {
                   variant={currentQuestionIndex === index ? "default" : "outline"}
                   size="sm"
                   className={`w-full justify-start text-left h-auto py-2 ${answersRef.current[q.id.toString()]?.trim() ? 'font-semibold' : ''} ${currentQuestionIndex === index ? '' : (answersRef.current[q.id.toString()]?.trim() ? 'border-green-500' : 'border-muted') }`}
-                  onClick={() => {if(!testSubmittedRef.current && !violationDialogState.isOpen) setCurrentQuestionIndex(index)}}
-                  disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}
+                  onClick={() => {if(!testSubmittedRef.current && !violationDialogStateRef.current.isOpen) setCurrentQuestionIndex(index)}}
+                  disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogStateRef.current.isOpen}
                 >
                   Q {index + 1} {answersRef.current[q.id.toString()]?.trim() ? <CheckCircle className="ml-auto h-4 w-4 text-green-600" /> : null}
                 </Button>
@@ -658,7 +633,7 @@ export default function TakeTestPage() {
                         variant={answersRef.current[currentQ.id.toString()] === option ? "default" : "outline"} 
                         className="w-full justify-start text-left h-auto py-3 whitespace-normal"
                         onClick={() => handleAnswerChange(currentQ.id, option)}
-                        disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}
+                        disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogStateRef.current.isOpen}
                       >
                         {option}
                       </Button>
@@ -676,7 +651,7 @@ export default function TakeTestPage() {
                       placeholder="Type your answer here..."
                       value={answersRef.current[currentQ.id.toString()] || ""}
                       onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
-                      disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}
+                      disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogStateRef.current.isOpen}
                     />
                   </>
                 )}
@@ -688,7 +663,7 @@ export default function TakeTestPage() {
                         variant={answersRef.current[currentQ.id.toString()] === option ? "default" : "outline"} 
                         className="w-full justify-start text-left h-auto py-3"
                         onClick={() => handleAnswerChange(currentQ.id, option)}
-                        disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}
+                        disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogStateRef.current.isOpen}
                       >
                         {option}
                       </Button>
@@ -699,11 +674,11 @@ export default function TakeTestPage() {
             </ScrollArea>
           )}
           <CardFooter className="border-t p-3 flex justify-between shrink-0">
-            <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0 || testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}>
+            <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0 || testSubmittedRef.current || isSubmittingRef.current || violationDialogStateRef.current.isOpen}>
               <ChevronLeft className="mr-1 h-4 w-4"/> Previous
             </Button>
             {currentQuestionIndex < shuffledQuestionsRef.current.length - 1 ? (
-              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestionsRef.current.length - 1, prev + 1))} disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}>
+              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestionsRef.current.length - 1, prev + 1))} disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogStateRef.current.isOpen}>
                 Next <ChevronRight className="ml-1 h-4 w-4"/>
               </Button>
             ) : (
@@ -716,7 +691,7 @@ export default function TakeTestPage() {
                     )
                 }} 
                 className="bg-green-600 hover:bg-green-700 text-white" 
-                disabled={isSubmittingRef.current || testSubmittedRef.current || violationDialogState.isOpen}
+                disabled={isSubmittingRef.current || testSubmittedRef.current || violationDialogStateRef.current.isOpen}
               >
                 {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4"/>}
                 {isSubmitting ? "Submitting..." : "Submit Test"}
@@ -782,3 +757,4 @@ export default function TakeTestPage() {
   );
 }
 
+    
