@@ -5,12 +5,29 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from '@/hooks/use-toast';
-import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send, CheckCircle, Loader2, ListChecks, EyeOff } from 'lucide-react';
+import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, ChevronRight, Send, CheckCircle, Loader2, ListChecks } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { getTestQuestions, submitTestAnswers } from '@/ai/flows/test-session-flow';
 import type { TestQuestion, SubmitTestAnswersOutput } from '@/ai/flows/test-session-types';
+
+interface ViolationDialogState {
+  isOpen: boolean;
+  reason: string;
+  onConfirm: () => void;
+  onCancel?: () => void;
+}
 
 export default function TakeTestPage() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
@@ -20,13 +37,18 @@ export default function TakeTestPage() {
   const [submissionDetails, setSubmissionDetails] = useState<SubmitTestAnswersOutput | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
-  const [proctoringWarning, setProctoringWarning] = useState<string | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(120 * 60); // 120 minutes in seconds
   const [shuffledQuestions, setShuffledQuestions] = useState<TestQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [testInstructions, setTestInstructions] = useState<string | null>(null);
 
+  const [violationDialogState, setViolationDialogState] = useState<ViolationDialogState>({
+    isOpen: false,
+    reason: '',
+    onConfirm: () => {},
+    onCancel: () => {},
+  });
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -76,26 +98,10 @@ export default function TakeTestPage() {
         videoElement.srcObject = currentStream;
         videoElement.play().catch(error => console.warn("Video play failed when setting srcObject:", error));
     }
-  }, [testStarted, hasCameraPermission, hasMicPermission]); // videoRef and streamRef are refs, not needed in deps
-
-  // Effect for component unmount cleanup
-  useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-      }
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-      }
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on unmount:", err.message));
-      }
-    };
-  }, []);
-
+  }, [testStarted, hasCameraPermission, hasMicPermission]);
 
   const enterFullScreen = useCallback(() => {
+    if (document.fullscreenElement) return;
     const elem = document.documentElement;
     if (elem.requestFullscreen) {
       elem.requestFullscreen().catch(err => console.warn("Fullscreen request failed:", err.message));
@@ -112,22 +118,20 @@ export default function TakeTestPage() {
     }
   }, []);
 
-
   const handleSubmitTest = useCallback(async (isAutoSubmit = false, autoSubmitReason = "Proctoring violation") => {
     if (testSubmitted || isSubmitting) return;
 
     setIsSubmitting(true);
-    setProctoringWarning(null); 
-    exitFullScreen(); // Exit fullscreen when test is submitted
+    exitFullScreen(); 
 
     try {
       const validAnswers: Record<string, string> = {};
       for (const key in answers) {
         if (answers[key] !== undefined && answers[key] !== null) {
-          validAnswers[key] = answers[key];
+          validAnswers[key.toString()] = answers[key];
         }
       }
-
+      
       const response = await submitTestAnswers({ 
         testId: 'SAMPLE_TEST_001', 
         answers: validAnswers,
@@ -139,7 +143,7 @@ export default function TakeTestPage() {
 
       if (response.success) {
         if (isAutoSubmit) {
-             toast({ variant: 'destructive', title: "Test Terminated", description: `Test submitted automatically due to: ${autoSubmitReason}. ${response.message}` });
+             toast({ variant: 'destructive', title: "Test Terminated", description: `Test submitted automatically after violation: ${autoSubmitReason}. ${response.message}` });
         } else {
              toast({ title: "Test Submitted!", description: response.message });
         }
@@ -157,6 +161,24 @@ export default function TakeTestPage() {
   }, [answers, toast, testSubmitted, isSubmitting, exitFullScreen, shuffledQuestions]);
 
 
+  const showViolationWarningDialog = useCallback((reason: string, onConfirmAction: () => void, onCancelAction?: () => void) => {
+    if (isSubmitting || testSubmitted || violationDialogState.isOpen) return;
+
+    setViolationDialogState({
+      isOpen: true,
+      reason,
+      onConfirm: () => {
+        onConfirmAction();
+        setViolationDialogState(prev => ({ ...prev, isOpen: false }));
+      },
+      onCancel: () => {
+        if (onCancelAction) onCancelAction();
+        setViolationDialogState(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  }, [isSubmitting, testSubmitted, violationDialogState.isOpen]);
+
+
   useEffect(() => {
     let timerId: NodeJS.Timeout;
     if (testStarted && !testSubmitted && timeLeft > 0) {
@@ -170,17 +192,9 @@ export default function TakeTestPage() {
     return () => clearInterval(timerId);
   }, [testStarted, timeLeft, testSubmitted, handleSubmitTest, toast]); 
   
-  // Lockdown features effect
  useEffect(() => {
-    if (!testStarted || testSubmitted) {
-      // If test is not active or already submitted, ensure no lockdown listeners are active.
-      // Fullscreen exit is handled by handleSubmitTest or unmount effect.
+    if (!testStarted || testSubmitted || violationDialogState.isOpen) {
       return;
-    }
-
-    // Attempt to enter fullscreen if not already
-    if (!document.fullscreenElement) {
-        enterFullScreen();
     }
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -189,27 +203,27 @@ export default function TakeTestPage() {
     };
 
     const handleVisibilityChange = () => {
-      if (document.hidden && testStarted && !testSubmitted) {
+      if (document.hidden && testStarted && !testSubmitted && !isSubmitting && !violationDialogState.isOpen) {
         const reason = "Tab switched or window minimized";
-        setProctoringWarning(`AI Alert: ${reason}. Test submitted automatically.`);
-        handleSubmitTest(true, reason); 
+        showViolationWarningDialog(reason, () => handleSubmitTest(true, reason));
       }
     };
     
     const handleWindowBlur = () => {
-      // Check if focus moved to browser chrome or another app, not just an in-page element like a toast
-      if (testStarted && !testSubmitted && document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML')) {
+      if (testStarted && !testSubmitted && document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML') && !isSubmitting && !violationDialogState.isOpen) {
          const reason = "Test window lost focus";
-         setProctoringWarning(`AI Alert: ${reason}. Test submitted automatically.`);
-         handleSubmitTest(true, reason);
+         showViolationWarningDialog(reason, () => handleSubmitTest(true, reason));
       }
     };
 
     const handleFullscreenChange = () => {
-        if (!document.fullscreenElement && testStarted && !testSubmitted) {
+        if (!document.fullscreenElement && testStarted && !testSubmitted && !isSubmitting && !violationDialogState.isOpen) {
             const reason = "Fullscreen mode exited";
-            setProctoringWarning(`AI Alert: ${reason}. Test submitted automatically.`);
-            handleSubmitTest(true, reason);
+            showViolationWarningDialog(
+              reason, 
+              () => handleSubmitTest(true, reason),
+              () => { if(testStarted && !testSubmitted) enterFullScreen(); } // Attempt to re-enter fullscreen on cancel
+            );
         }
     };
 
@@ -224,12 +238,12 @@ export default function TakeTestPage() {
        const isProhibitedMeta = e.metaKey && (prohibitedCtrl.includes(e.key.toLowerCase()) || e.key.toLowerCase() === 'meta' || e.key.toLowerCase() === 'alt'); 
        const isProhibitedKey = prohibitedKeys.includes(e.key) || (e.altKey && e.key === 'Tab');
 
-
       if (isProhibitedCtrlShift || isProhibitedCtrl || isProhibitedMeta || isProhibitedKey) {
         e.preventDefault();
-        const reason = `Prohibited action detected (${e.key} pressed).`;
-        setProctoringWarning(`AI Alert: ${reason}. Test submitted automatically.`);
-        handleSubmitTest(true, reason);
+        if (testStarted && !testSubmitted && !isSubmitting && !violationDialogState.isOpen) {
+            const reason = `Prohibited action detected (${e.key} pressed)`;
+            showViolationWarningDialog(reason, () => handleSubmitTest(true, reason));
+        }
       }
     };
     
@@ -240,7 +254,6 @@ export default function TakeTestPage() {
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange); 
     document.addEventListener('mozfullscreenchange', handleFullscreenChange); 
     document.addEventListener('MSFullscreenChange', handleFullscreenChange); 
-
     document.addEventListener('contextmenu', disableContextMenu);
     document.addEventListener('keydown', disableShortcuts);
 
@@ -255,7 +268,20 @@ export default function TakeTestPage() {
       document.removeEventListener('contextmenu', disableContextMenu);
       document.removeEventListener('keydown', disableShortcuts);
     };
-  }, [testStarted, testSubmitted, handleSubmitTest, toast, enterFullScreen]);
+  }, [testStarted, testSubmitted, handleSubmitTest, toast, enterFullScreen, showViolationWarningDialog, isSubmitting, violationDialogState.isOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      exitFullScreen();
+    };
+  }, [exitFullScreen]);
 
 
   const handleStartTest = async () => {
@@ -292,11 +318,10 @@ export default function TakeTestPage() {
       setCurrentQuestionIndex(0);
       setAnswers({});
       setTimeLeft(120 * 60); 
-      setProctoringWarning(null);
       setSubmissionDetails(null);
-      setTestSubmitted(false); // Ensure test is not marked as submitted before starting
-      setTestStarted(true);   // Set test started to true
-      enterFullScreen();      // Attempt to enter fullscreen
+      setTestSubmitted(false); 
+      setTestStarted(true);   
+      enterFullScreen();      
       
     } catch (error) {
       toast({ variant: 'destructive', title: "Failed to Load Test", description: "Could not fetch test questions. Please try again."});
@@ -434,6 +459,27 @@ export default function TakeTestPage() {
             </Button>
           </CardFooter>
         </Card>
+        {violationDialogState.isOpen && (
+          <AlertDialog open={violationDialogState.isOpen} onOpenChange={(open) => {
+            if (!open) { // If dialog is closed (e.g. by ESC or clicking away)
+                if (violationDialogState.onCancel) violationDialogState.onCancel();
+                else setViolationDialogState(prev => ({ ...prev, isOpen: false }));
+            }
+          }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2"><AlertTriangle className="text-destructive"/> Proctoring Alert</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {violationDialogState.reason}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={violationDialogState.onCancel}>Cancel / Go Back</AlertDialogCancel>
+                <AlertDialogAction onClick={violationDialogState.onConfirm} className="bg-destructive hover:bg-destructive/90">Acknowledge & Submit Test</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </div>
     );
   }
@@ -452,7 +498,6 @@ export default function TakeTestPage() {
       </header>
 
       <div className="flex-grow grid grid-cols-12 gap-4 p-4 overflow-hidden">
-        {/* Question Navigation Panel */}
         <Card className="col-span-12 md:col-span-2 shadow-lg flex flex-col">
           <CardHeader className="p-3 border-b">
             <CardTitle className="text-base flex items-center gap-2"><ListChecks className="h-5 w-5 text-primary"/> Questions</CardTitle>
@@ -465,8 +510,8 @@ export default function TakeTestPage() {
                   variant={currentQuestionIndex === index ? "default" : "outline"}
                   size="sm"
                   className={`w-full justify-start text-left h-auto py-2 ${answers[q.id.toString()]?.trim() ? 'font-semibold' : ''} ${currentQuestionIndex === index ? '' : (answers[q.id.toString()]?.trim() ? 'border-green-500' : 'border-muted') }`}
-                  onClick={() => {if(!testSubmitted) setCurrentQuestionIndex(index)}}
-                  disabled={testSubmitted || isSubmitting}
+                  onClick={() => {if(!testSubmitted && !violationDialogState.isOpen) setCurrentQuestionIndex(index)}}
+                  disabled={testSubmitted || isSubmitting || violationDialogState.isOpen}
                 >
                   Q {index + 1} {answers[q.id.toString()]?.trim() ? <CheckCircle className="ml-auto h-4 w-4 text-green-600" /> : null}
                 </Button>
@@ -475,7 +520,6 @@ export default function TakeTestPage() {
           </ScrollArea>
         </Card>
         
-        {/* Main Question Area */}
         <Card className="col-span-12 md:col-span-7 shadow-lg flex flex-col overflow-hidden">
           <CardHeader className="border-b p-3">
             <CardTitle className="text-lg">Question {currentQuestionIndex + 1} of {shuffledQuestions.length}</CardTitle>
@@ -493,7 +537,7 @@ export default function TakeTestPage() {
                         variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
                         className="w-full justify-start text-left h-auto py-3 whitespace-normal"
                         onClick={() => handleAnswerChange(currentQ.id, option)}
-                        disabled={testSubmitted || isSubmitting}
+                        disabled={testSubmitted || isSubmitting || violationDialogState.isOpen}
                       >
                         {option}
                       </Button>
@@ -511,7 +555,7 @@ export default function TakeTestPage() {
                       placeholder="Type your answer here..."
                       value={answers[currentQ.id.toString()] || ""}
                       onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
-                      disabled={testSubmitted || isSubmitting}
+                      disabled={testSubmitted || isSubmitting || violationDialogState.isOpen}
                     />
                   </>
                 )}
@@ -523,7 +567,7 @@ export default function TakeTestPage() {
                         variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
                         className="w-full justify-start text-left h-auto py-3"
                         onClick={() => handleAnswerChange(currentQ.id, option)}
-                        disabled={testSubmitted || isSubmitting}
+                        disabled={testSubmitted || isSubmitting || violationDialogState.isOpen}
                       >
                         {option}
                       </Button>
@@ -534,15 +578,25 @@ export default function TakeTestPage() {
             </ScrollArea>
           )}
           <CardFooter className="border-t p-3 flex justify-between shrink-0">
-            <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0 || testSubmitted || isSubmitting}>
+            <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0 || testSubmitted || isSubmitting || violationDialogState.isOpen}>
               <ChevronLeft className="mr-1 h-4 w-4"/> Previous
             </Button>
             {currentQuestionIndex < shuffledQuestions.length - 1 ? (
-              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestions.length - 1, prev + 1))} disabled={testSubmitted || isSubmitting}>
+              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestions.length - 1, prev + 1))} disabled={testSubmitted || isSubmitting || violationDialogState.isOpen}>
                 Next <ChevronRight className="ml-1 h-4 w-4"/>
               </Button>
             ) : (
-              <Button onClick={() => handleSubmitTest(false, "Manual submission")} className="bg-green-600 hover:bg-green-700 text-white" disabled={isSubmitting || testSubmitted}>
+              <Button 
+                onClick={() => {
+                    showViolationWarningDialog(
+                        "Are you sure you want to submit your test? This action cannot be undone.",
+                        () => handleSubmitTest(false, "Manual submission"),
+                        () => {} // Do nothing on cancel for manual submit confirmation
+                    )
+                }} 
+                className="bg-green-600 hover:bg-green-700 text-white" 
+                disabled={isSubmitting || testSubmitted || violationDialogState.isOpen}
+              >
                 {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4"/>}
                 {isSubmitting ? "Submitting..." : "Submit Test"}
               </Button>
@@ -550,7 +604,6 @@ export default function TakeTestPage() {
           </CardFooter>
         </Card>
 
-        {/* Proctoring & Security Panel */}
         <div className="col-span-12 md:col-span-3 space-y-4 flex flex-col">
           <Card className="shadow-md flex-none">
             <CardHeader className="p-3 pb-1">
@@ -560,13 +613,6 @@ export default function TakeTestPage() {
               <video ref={videoRef} className="w-full aspect-video rounded-md bg-background border" autoPlay muted playsInline />
             </CardContent>
           </Card>
-           {proctoringWarning && (
-            <Alert variant="destructive" className="flex-none shadow-lg">
-              <AlertTriangle className="h-5 w-5" />
-              <AlertTitle className="font-semibold">AI Proctoring Alert!</AlertTitle>
-              <AlertDescription>{proctoringWarning}</AlertDescription>
-            </Alert>
-          )}
           <Card className="shadow-md flex-grow flex flex-col">
              <CardHeader className="p-3 pb-1">
                 <CardTitle className="text-base flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary"/> Security Status</CardTitle>
@@ -585,7 +631,35 @@ export default function TakeTestPage() {
           </Card>
         </div>
       </div>
+      {violationDialogState.isOpen && (
+         <AlertDialog open={violationDialogState.isOpen} onOpenChange={(open) => {
+            if (!open) { // If dialog is closed (e.g. by ESC or clicking away)
+                if (violationDialogState.onCancel) {
+                    violationDialogState.onCancel();
+                } else {
+                    setViolationDialogState(prev => ({ ...prev, isOpen: false, reason: '', onConfirm: () => {}, onCancel: () => {} }));
+                }
+            }
+          }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2"><AlertTriangle className="text-destructive h-6 w-6"/> Proctoring Violation Alert</AlertDialogTitle>
+              <AlertDialogDescription className="py-4">
+                {violationDialogState.reason}.
+                <br/><br/>
+                Continuing this action or acknowledging this warning will result in your test being submitted immediately and may be flagged for review.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={violationDialogState.onCancel}>Cancel / Go Back</AlertDialogCancel>
+              <AlertDialogAction onClick={violationDialogState.onConfirm} className="bg-destructive hover:bg-destructive/90">Acknowledge &amp; Submit Test</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }
 
+
+  
