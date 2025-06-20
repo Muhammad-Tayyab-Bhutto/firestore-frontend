@@ -112,17 +112,21 @@ const submitTestAnswersFlow = ai.defineFlow(
     if (score !== undefined) {
       message += ` Your score is ${score}%.`;
     }
-    if (input.isAutoSubmitted) {
-        message = `Test was automatically submitted due to ${input.autoSubmitReason || 'a proctoring violation'}. ${message}`;
-    }
+    // The client-side toast will prepend information about auto-submission and the reason.
+    // So, the flow's message here should be the core result.
+    // If it was auto-submitted, the client already knows the reason from its local state/params.
 
+    // Example of refined message logic:
+    // If `input.isAutoSubmitted` is true, the client toast in `take-test/page.tsx` will display:
+    // `Test automatically submitted due to ${autoSubmitReason}. ${response.message_from_flow}`
+    // So, `response.message_from_flow` should just be the "Test answers submitted successfully. Your score is X%." part.
 
     return { 
       success: true, 
-      message,
+      message, // This message no longer redundantly includes the auto-submission reason.
       score,
       passed,
-      proctoringViolation: input.isAutoSubmitted
+      proctoringViolation: input.isAutoSubmitted 
     };
   }
 );
