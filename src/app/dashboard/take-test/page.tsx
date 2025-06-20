@@ -32,27 +32,62 @@ interface ViolationDialogState {
 export default function TakeTestPage() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [hasMicPermission, setHasMicPermission] = useState<boolean | null>(null);
-  const [testStarted, setTestStarted] = useState(false);
-  const [testSubmitted, setTestSubmitted] = useState(false);
+  const [testStarted, setTestStartedState] = useState(false); // Renamed for clarity
   const [submissionDetails, setSubmissionDetails] = useState<SubmitTestAnswersOutput | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(120 * 60); // 120 minutes in seconds
-  const [shuffledQuestions, setShuffledQuestions] = useState<TestQuestion[]>([]);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [timeLeft, setTimeLeft] = useState(120 * 60); 
+  const [shuffledQuestions, setShuffledQuestionsState] = useState<TestQuestion[]>([]); // Renamed
+  const [answers, setAnswersState] = useState<Record<string, string>>({}); // Renamed
   const [testInstructions, setTestInstructions] = useState<string | null>(null);
 
   const [violationDialogState, setViolationDialogState] = useState<ViolationDialogState>({
     isOpen: false,
     reason: '',
     onConfirm: () => {},
-    onCancel: () => {},
+    onCancel: undefined,
   });
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const { toast } = useToast();
+
+  // Refs for state values to stabilize callbacks
+  const testStartedRef = useRef(testStarted);
+  const setTestStarted = (val: boolean) => {
+    setTestStartedState(val);
+    testStartedRef.current = val;
+  };
+
+  const [testSubmitted, setTestSubmittedState] = useState(false);
+  const testSubmittedRef = useRef(testSubmitted);
+  const setTestSubmitted = (val: boolean) => {
+    setTestSubmittedState(val);
+    testSubmittedRef.current = val;
+  };
+
+  const [isSubmitting, setIsSubmittingState] = useState(false);
+  const isSubmittingRef = useRef(isSubmitting);
+  const setIsSubmitting = (val: boolean) => {
+    setIsSubmittingState(val);
+    isSubmittingRef.current = val;
+  };
+  
+  const answersRef = useRef(answers);
+  const setAnswers = (updater: React.SetStateAction<Record<string, string>>) => {
+    setAnswersState(prevAnswers => {
+      const newAnswers = typeof updater === 'function' ? updater(prevAnswers) : updater;
+      answersRef.current = newAnswers;
+      return newAnswers;
+    });
+  };
+
+  const shuffledQuestionsRef = useRef(shuffledQuestions);
+   const setShuffledQuestions = (newQuestions: TestQuestion[]) => {
+    setShuffledQuestionsState(newQuestions);
+    shuffledQuestionsRef.current = newQuestions;
+  };
+
 
   const requestPermissions = useCallback(async () => {
     try {
@@ -85,49 +120,64 @@ export default function TakeTestPage() {
   }, [toast]);
 
   useEffect(() => {
-    if (!testStarted && (hasCameraPermission === null || hasMicPermission === null) && !streamRef.current) {
+    if (!testStartedRef.current && (hasCameraPermission === null || hasMicPermission === null) && !streamRef.current) {
       requestPermissions();
     }
-  }, [testStarted, hasCameraPermission, hasMicPermission, requestPermissions]);
+  }, [hasCameraPermission, hasMicPermission, requestPermissions]);
 
   useEffect(() => {
     const videoElement = videoRef.current;
     const currentStream = streamRef.current;
-
     if (videoElement && currentStream && videoElement.srcObject !== currentStream) {
         videoElement.srcObject = currentStream;
         videoElement.play().catch(error => console.warn("Video play failed when setting srcObject:", error));
     }
-  }, [testStarted, hasCameraPermission, hasMicPermission]);
+  }, [hasCameraPermission, hasMicPermission]);
 
-  const enterFullScreen = useCallback(() => {
+  const enterFullScreen = useCallback(async () => {
     if (document.fullscreenElement) return;
     const elem = document.documentElement;
-    if (elem.requestFullscreen) {
-      elem.requestFullscreen().catch(err => console.warn("Fullscreen request failed:", err.message));
-    } else if ((elem as any).webkitRequestFullscreen) { 
-      (elem as any).webkitRequestFullscreen();
-    } else if ((elem as any).msRequestFullscreen) { 
-      (elem as any).msRequestFullscreen();
+    try {
+        if (elem.requestFullscreen) {
+            await elem.requestFullscreen();
+        } else if ((elem as any).webkitRequestFullscreen) { 
+            await (elem as any).webkitRequestFullscreen();
+        } else if ((elem as any).msRequestFullscreen) { 
+            await (elem as any).msRequestFullscreen();
+        }
+    } catch (err) {
+        console.warn("Fullscreen request failed:", err instanceof Error ? err.message : err);
+        // If fullscreen fails, it's a critical issue for proctoring.
+        // Consider showing a specific error to the user or preventing test start.
+        toast({variant: 'destructive', title: "Fullscreen Error", description: "Could not enter fullscreen mode. This is required for the test."})
     }
-  }, []);
+  }, [toast]);
 
-  const exitFullScreen = useCallback(() => {
+  const exitFullScreen = useCallback(async () => {
     if (document.fullscreenElement) {
-      document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen:", err.message));
+      try {
+        await document.exitFullscreen();
+      } catch (err) {
+        console.warn("Error exiting fullscreen:", err instanceof Error ? err.message : err);
+      }
     }
   }, []);
 
   const handleSubmitTest = useCallback(async (isAutoSubmit = false, autoSubmitReason = "Proctoring violation") => {
-    if (testSubmitted || isSubmitting) return;
+    if (testSubmittedRef.current || isSubmittingRef.current) return;
 
     setIsSubmitting(true);
-    exitFullScreen(); 
-
+    
+    if (document.fullscreenElement) {
+      await exitFullScreen();
+    }
+    
     try {
+      const currentAnswers = answersRef.current;
+      const currentQuestions = shuffledQuestionsRef.current;
       const validAnswers: Record<string, string> = {};
-      shuffledQuestions.forEach(q => { // Iterate over shuffledQuestions to ensure all question IDs are considered
-        const answer = answers[q.id.toString()];
+      currentQuestions.forEach(q => {
+        const answer = currentAnswers[q.id.toString()];
         if (answer !== undefined && answer !== null) {
           validAnswers[q.id.toString()] = answer;
         }
@@ -143,11 +193,11 @@ export default function TakeTestPage() {
       setSubmissionDetails(response); 
 
       if (response.success) {
-        if (isAutoSubmit) {
-             toast({ variant: 'destructive', title: "Test Terminated", description: `Test submitted automatically: ${autoSubmitReason}. ${response.message}` });
-        } else {
-             toast({ title: "Test Submitted!", description: response.message });
-        }
+        toast({ 
+            variant: isAutoSubmit ? 'destructive' : 'default', 
+            title: isAutoSubmit ? "Test Terminated" : "Test Submitted!", 
+            description: `${isAutoSubmit ? `Test submitted automatically: ${autoSubmitReason}. ` : ''}${response.message}`
+        });
         setTestSubmitted(true);
         setTestStarted(false); 
       } else {
@@ -159,98 +209,155 @@ export default function TakeTestPage() {
     } finally {
         setIsSubmitting(false);
     }
-  }, [answers, toast, testSubmitted, isSubmitting, exitFullScreen, shuffledQuestions]);
+  }, [toast, exitFullScreen, setIsSubmitting, setSubmissionDetails, setTestStarted, setTestSubmitted]);
 
 
   const showViolationWarningDialog = useCallback((reason: string, onConfirmAction: () => void, onCancelAction?: () => void) => {
-    if (isSubmitting || testSubmitted || violationDialogState.isOpen) return;
+    if (isSubmittingRef.current || testSubmittedRef.current || violationDialogState.isOpen) return;
 
     setViolationDialogState({
       isOpen: true,
       reason,
       onConfirm: () => {
         onConfirmAction();
-        setViolationDialogState(prev => ({ ...prev, isOpen: false }));
+        setViolationDialogState(prev => ({ ...prev, isOpen: false, reason: '', onConfirm: () => {}, onCancel: undefined }));
       },
       onCancel: () => {
         if (onCancelAction) onCancelAction();
-        setViolationDialogState(prev => ({ ...prev, isOpen: false }));
+        setViolationDialogState(prev => ({ ...prev, isOpen: false, reason: '', onConfirm: () => {}, onCancel: undefined }));
       }
     });
-  }, [isSubmitting, testSubmitted, violationDialogState.isOpen]);
+  }, [violationDialogState.isOpen]);
 
 
   useEffect(() => {
     let timerId: NodeJS.Timeout;
-    if (testStarted && !testSubmitted && timeLeft > 0) {
+    if (testStartedRef.current && !testSubmittedRef.current && timeLeft > 0) {
       timerId = setInterval(() => {
         setTimeLeft(prevTime => prevTime - 1);
       }, 1000);
-    } else if (testStarted && !testSubmitted && timeLeft === 0) {
+    } else if (testStartedRef.current && !testSubmittedRef.current && timeLeft === 0) {
       toast({ title: "Time's Up!", description: "Your test will be submitted automatically." });
       handleSubmitTest(true, "Time expired"); 
     }
     return () => clearInterval(timerId);
-  }, [testStarted, timeLeft, testSubmitted, handleSubmitTest, toast]); 
+  }, [timeLeft, handleSubmitTest, toast]); 
   
- useEffect(() => {
-    if (!testStarted || testSubmitted || violationDialogState.isOpen) {
-      return;
-    }
-
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+  const handleBeforeUnload = useCallback((e: BeforeUnloadEvent) => {
+      if (!testStartedRef.current || testSubmittedRef.current || violationDialogState.isOpen) return;
       e.preventDefault();
       e.returnValue = 'Are you sure you want to leave? Your test progress might be lost and the test will be submitted.';
-    };
+  }, [violationDialogState.isOpen]);
 
-    const handleVisibilityChange = () => {
-      if (document.hidden && testStarted && !testSubmitted && !isSubmitting && !violationDialogState.isOpen) {
+  const handleVisibilityChange = useCallback(() => {
+      if (document.hidden && testStartedRef.current && !testSubmittedRef.current && !isSubmittingRef.current && !violationDialogState.isOpen) {
         const reason = "Tab switched or window minimized. This is a violation.";
         showViolationWarningDialog(
             reason, 
             () => handleSubmitTest(true, "Tab switched or window minimized"),
-            () => {} // If user cancels, they are back, test continues
+            () => {} 
         );
       }
-    };
+  }, [handleSubmitTest, showViolationWarningDialog, violationDialogState.isOpen]);
     
-    const handleWindowBlur = () => {
-      if (testStarted && !testSubmitted && document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML') && !isSubmitting && !violationDialogState.isOpen) {
+  const handleWindowBlur = useCallback(() => {
+      if (testStartedRef.current && !testSubmittedRef.current && document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML') && !isSubmittingRef.current && !violationDialogState.isOpen) {
          const reason = "Test window lost focus. This is a violation.";
          showViolationWarningDialog(
             reason, 
             () => handleSubmitTest(true, "Test window lost focus"),
-            () => {} // If user cancels, they are back, test continues
+            () => {}
         );
       }
-    };
+  }, [handleSubmitTest, showViolationWarningDialog, violationDialogState.isOpen]);
 
-    const handleFullscreenChange = () => {
-        if (!document.fullscreenElement && testStarted && !testSubmitted && !isSubmitting && !violationDialogState.isOpen) {
-            const reason = "Fullscreen mode exited. This is a violation.";
-            showViolationWarningDialog(
-              reason, 
-              () => handleSubmitTest(true, "Fullscreen mode exited"),
-              () => { if(testStarted && !testSubmitted) enterFullScreen(); } 
-            );
-        }
-    };
-
-    const disableContextMenu = (e: MouseEvent) => e.preventDefault();
-
-    const disableShortcuts = (e: KeyboardEvent) => {
-       const prohibitedCtrlShift = ['i', 'I', 'j', 'J', 'c', 'C']; 
-       const prohibitedCtrl = ['r', 'R', 't', 'T', 'n', 'N', 'p', 'P', 's', 'S', 'u', 'U', 'w', 'W', 'x', 'X', 'v', 'V', 'a', 'A'];
-       const prohibitedKeys = ['F5', 'F11', 'F12', 'PrintScreen', 'ContextMenu', 'Meta', 'AltGraph', 'ScrollLock', 'Pause', 'Insert', 'Home', 'End', 'PageUp', 'PageDown', 'Escape'];
-       const isProhibitedCtrlShift = e.ctrlKey && e.shiftKey && prohibitedCtrlShift.includes(e.key.toLowerCase());
-       const isProhibitedCtrl = e.ctrlKey && prohibitedCtrl.includes(e.key.toLowerCase());
-       const isProhibitedMeta = e.metaKey && (prohibitedCtrl.includes(e.key.toLowerCase()) || e.key.toLowerCase() === 'meta' || e.key.toLowerCase() === 'alt'); 
-       const isProhibitedKey = prohibitedKeys.includes(e.key) || (e.altKey && e.key === 'Tab');
-
-      if (isProhibitedCtrlShift || isProhibitedCtrl || isProhibitedMeta || isProhibitedKey) {
-        e.preventDefault(); // Only prevent the default action. No dialog, no auto-submit.
+  const handleFullscreenChange = useCallback(() => {
+      if (!document.fullscreenElement && testStartedRef.current && !testSubmittedRef.current && !isSubmittingRef.current && !violationDialogState.isOpen) {
+          const reason = "Fullscreen mode exited. This is a violation.";
+          showViolationWarningDialog(
+            reason, 
+            () => handleSubmitTest(true, "Fullscreen mode exited"),
+            async () => { if(testStartedRef.current && !testSubmittedRef.current) await enterFullScreen(); } 
+          );
       }
-    };
+  }, [handleSubmitTest, showViolationWarningDialog, enterFullScreen, violationDialogState.isOpen]);
+
+  const disableContextMenu = useCallback((e: MouseEvent) => {
+      if (!testStartedRef.current || testSubmittedRef.current || violationDialogState.isOpen) return;
+      e.preventDefault();
+  }, [violationDialogState.isOpen]);
+
+  const disableShortcuts = useCallback((e: KeyboardEvent) => {
+    if (!testStartedRef.current || testSubmittedRef.current || violationDialogState.isOpen) return;
+
+    const keyLower = e.key.toLowerCase();
+
+    // Ctrl+Shift combinations (e.g., DevTools, Task Manager on some OS)
+    // Common ones: Ctrl+Shift+I (DevTools), Ctrl+Shift+J (Console), Ctrl+Shift+C (Inspect Element)
+    if (e.ctrlKey && e.shiftKey && ['i', 'j', 'c'].includes(keyLower)) {
+      e.preventDefault(); return;
+    }
+
+    // Ctrl combinations (excluding Alt, Meta, Shift to be more specific)
+    if (e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && 
+        ['r', 't', 'n', 'p', 's', 'c', 'v', 'x', 'z', 'y', 'a', 'u', 'w', 'f', 'h', 'o', 'l', 'k', 'g', 'd', 'b', 'e', 'm'].includes(keyLower)) {
+        // r(refresh), t(new tab), n(new window), p(print), s(save), c(copy), v(paste), x(cut), z(undo), y(redo), a(select all), u(view source), w(close tab/window)
+        // f(find), h(history), o(open file), l(location bar), k(search bar), g(find again), d(bookmark), b(bookmarks), e(edit menu), m(mute tab)
+      e.preventDefault(); return;
+    }
+
+    // Meta key (Cmd on Mac, Win key on Windows) combinations
+    if (e.metaKey && ['r', 't', 'n', 'w', 'q', 'p', 's', 'h', 'l', 'f', 'g', 'o', 'u', 'c', 'v', 'x', 'z', 'y', 'a'].includes(keyLower)) {
+      // Similar to Ctrl, but for Mac primarily. q(quit), w(close window)
+      e.preventDefault(); return;
+    }
+    
+    // Alt key combinations
+    // IMPORTANT: Blocking Alt+Tab or Alt+F4 reliably is often impossible at the OS level.
+    // The browser might preventDefault on the event, but the OS may still act.
+    // We rely on focus/visibility change detection for these.
+    if (e.altKey) {
+      if (e.key === 'Tab') { 
+        e.preventDefault(); // Attempt to block, OS likely overrides
+        return;
+      }
+      if (keyLower === 'f4') { 
+        e.preventDefault(); // Attempt to block, OS likely overrides
+        return;
+      }
+      // Block Alt + Left/Right arrow (browser navigation)
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home') { // Alt+Home
+        e.preventDefault(); return;
+      }
+    }
+
+    // Function keys (F1-F12) and other problematic single keys
+    const fKeys = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'];
+    if (fKeys.includes(e.key) || e.key === 'PrintScreen' || e.key === 'ContextMenu' || e.key === 'ScrollLock' || e.key === 'Pause' || e.key === 'Insert' || e.key === 'Home' || e.key === 'End' || e.key === 'PageUp' || e.key === 'PageDown') {
+       e.preventDefault(); return;
+    }
+    
+    // If Escape is pressed while in fullscreen, we WANT it to exit fullscreen.
+    // The 'fullscreenchange' event will then trigger the violation dialog.
+    if (e.key === 'Escape' && document.fullscreenElement) {
+        return; // Do not prevent default, let fullscreenchange handler catch it.
+    }
+
+  }, [violationDialogState.isOpen]); // Dependencies: testStarted, testSubmitted, violationDialogState.isOpen (via refs)
+
+ useEffect(() => {
+    if (!testStartedRef.current || testSubmittedRef.current || violationDialogState.isOpen) {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange); 
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange); 
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange); 
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange); 
+      document.removeEventListener('contextmenu', disableContextMenu);
+      document.removeEventListener('keydown', disableShortcuts);
+      return;
+    }
     
     window.addEventListener('beforeunload', handleBeforeUnload);
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -273,9 +380,13 @@ export default function TakeTestPage() {
       document.removeEventListener('contextmenu', disableContextMenu);
       document.removeEventListener('keydown', disableShortcuts);
     };
-  }, [testStarted, testSubmitted, handleSubmitTest, toast, enterFullScreen, showViolationWarningDialog, isSubmitting, violationDialogState.isOpen]);
+  // These callbacks are now stable due to their own useCallback or being simple functions.
+  // Key state refs (testStartedRef, testSubmittedRef, violationDialogState.isOpen) are checked inside callbacks.
+  }, [testStarted, testSubmitted, violationDialogState.isOpen, handleBeforeUnload, handleVisibilityChange, handleWindowBlur, handleFullscreenChange, disableContextMenu, disableShortcuts]);
+
 
   useEffect(() => {
+    // Cleanup function for when the component unmounts
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -284,7 +395,10 @@ export default function TakeTestPage() {
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
-      exitFullScreen();
+      // Attempt to exit fullscreen if component unmounts while test might be active
+      if (document.fullscreenElement) {
+         exitFullScreen();
+      }
     };
   }, [exitFullScreen]);
 
@@ -321,12 +435,12 @@ export default function TakeTestPage() {
       setTestInstructions(instructions || "No specific instructions provided. Follow general test guidelines.");
       
       setCurrentQuestionIndex(0);
-      setAnswers({});
+      setAnswers({}); // Resets answers
       setTimeLeft(120 * 60); 
       setSubmissionDetails(null);
       setTestSubmitted(false); 
       setTestStarted(true);   
-      enterFullScreen();      
+      await enterFullScreen();      
       
     } catch (error) {
       toast({ variant: 'destructive', title: "Failed to Load Test", description: "Could not fetch test questions. Please try again."});
@@ -345,11 +459,11 @@ export default function TakeTestPage() {
   };
 
   const handleAnswerChange = (questionId: number, answer: string) => {
-    if (testSubmitted || isSubmitting) return;
+    if (testSubmittedRef.current || isSubmittingRef.current) return;
     setAnswers(prev => ({ ...prev, [questionId.toString()]: answer }));
   };
   
-  if ((hasCameraPermission === null || hasMicPermission === null) && !testStarted && !streamRef.current) {
+  if ((hasCameraPermission === null || hasMicPermission === null) && !testStartedRef.current && !streamRef.current) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-10rem)]">
         <Card className="w-full max-w-md p-6 text-center">
@@ -363,7 +477,7 @@ export default function TakeTestPage() {
     );
   }
   
-  const currentQ = testStarted && shuffledQuestions.length > 0 ? shuffledQuestions[currentQuestionIndex] : null;
+  const currentQ = testStartedRef.current && shuffledQuestionsRef.current.length > 0 ? shuffledQuestionsRef.current[currentQuestionIndex] : null;
 
   if (testSubmitted && submissionDetails) {
     return (
@@ -468,7 +582,7 @@ export default function TakeTestPage() {
           <AlertDialog open={violationDialogState.isOpen} onOpenChange={(open) => {
             if (!open) { 
                 if (violationDialogState.onCancel) violationDialogState.onCancel();
-                else setViolationDialogState(prev => ({ ...prev, isOpen: false }));
+                else setViolationDialogState(prev => ({ ...prev, isOpen: false, reason: '', onConfirm: () => {}, onCancel: undefined }));
             }
           }}>
             <AlertDialogContent>
@@ -511,16 +625,16 @@ export default function TakeTestPage() {
           </CardHeader>
           <ScrollArea className="flex-grow">
             <CardContent className="p-2 space-y-1">
-              {shuffledQuestions.map((q, index) => (
+              {shuffledQuestionsRef.current.map((q, index) => (
                 <Button
                   key={q.id}
                   variant={currentQuestionIndex === index ? "default" : "outline"}
                   size="sm"
-                  className={`w-full justify-start text-left h-auto py-2 ${answers[q.id.toString()]?.trim() ? 'font-semibold' : ''} ${currentQuestionIndex === index ? '' : (answers[q.id.toString()]?.trim() ? 'border-green-500' : 'border-muted') }`}
-                  onClick={() => {if(!testSubmitted && !violationDialogState.isOpen) setCurrentQuestionIndex(index)}}
-                  disabled={testSubmitted || isSubmitting || violationDialogState.isOpen}
+                  className={`w-full justify-start text-left h-auto py-2 ${answersRef.current[q.id.toString()]?.trim() ? 'font-semibold' : ''} ${currentQuestionIndex === index ? '' : (answersRef.current[q.id.toString()]?.trim() ? 'border-green-500' : 'border-muted') }`}
+                  onClick={() => {if(!testSubmittedRef.current && !violationDialogState.isOpen) setCurrentQuestionIndex(index)}}
+                  disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}
                 >
-                  Q {index + 1} {answers[q.id.toString()]?.trim() ? <CheckCircle className="ml-auto h-4 w-4 text-green-600" /> : null}
+                  Q {index + 1} {answersRef.current[q.id.toString()]?.trim() ? <CheckCircle className="ml-auto h-4 w-4 text-green-600" /> : null}
                 </Button>
               ))}
             </CardContent>
@@ -529,8 +643,8 @@ export default function TakeTestPage() {
         
         <Card className="col-span-12 md:col-span-7 shadow-lg flex flex-col overflow-hidden">
           <CardHeader className="border-b p-3">
-            <CardTitle className="text-lg">Question {currentQuestionIndex + 1} of {shuffledQuestions.length}</CardTitle>
-            <Progress value={shuffledQuestions.length > 0 ? ((currentQuestionIndex + 1) / shuffledQuestions.length) * 100 : 0} className="mt-2 h-2" />
+            <CardTitle className="text-lg">Question {currentQuestionIndex + 1} of {shuffledQuestionsRef.current.length}</CardTitle>
+            <Progress value={shuffledQuestionsRef.current.length > 0 ? ((currentQuestionIndex + 1) / shuffledQuestionsRef.current.length) * 100 : 0} className="mt-2 h-2" />
           </CardHeader>
           {currentQ && (
             <ScrollArea className="flex-grow">
@@ -541,10 +655,10 @@ export default function TakeTestPage() {
                     {currentQ.options.map((option, index) => (
                       <Button 
                         key={index} 
-                        variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
+                        variant={answersRef.current[currentQ.id.toString()] === option ? "default" : "outline"} 
                         className="w-full justify-start text-left h-auto py-3 whitespace-normal"
                         onClick={() => handleAnswerChange(currentQ.id, option)}
-                        disabled={testSubmitted || isSubmitting || violationDialogState.isOpen}
+                        disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}
                       >
                         {option}
                       </Button>
@@ -560,9 +674,9 @@ export default function TakeTestPage() {
                       rows={8}
                       className="w-full p-2 border rounded-md focus:ring-primary focus:border-primary text-sm bg-background disabled:opacity-70 disabled:bg-muted/50"
                       placeholder="Type your answer here..."
-                      value={answers[currentQ.id.toString()] || ""}
+                      value={answersRef.current[currentQ.id.toString()] || ""}
                       onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
-                      disabled={testSubmitted || isSubmitting || violationDialogState.isOpen}
+                      disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}
                     />
                   </>
                 )}
@@ -571,10 +685,10 @@ export default function TakeTestPage() {
                     {currentQ.options.map((option, index) => (
                       <Button 
                         key={index} 
-                        variant={answers[currentQ.id.toString()] === option ? "default" : "outline"} 
+                        variant={answersRef.current[currentQ.id.toString()] === option ? "default" : "outline"} 
                         className="w-full justify-start text-left h-auto py-3"
                         onClick={() => handleAnswerChange(currentQ.id, option)}
-                        disabled={testSubmitted || isSubmitting || violationDialogState.isOpen}
+                        disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}
                       >
                         {option}
                       </Button>
@@ -585,11 +699,11 @@ export default function TakeTestPage() {
             </ScrollArea>
           )}
           <CardFooter className="border-t p-3 flex justify-between shrink-0">
-            <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0 || testSubmitted || isSubmitting || violationDialogState.isOpen}>
+            <Button variant="outline" onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev -1))} disabled={currentQuestionIndex === 0 || testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}>
               <ChevronLeft className="mr-1 h-4 w-4"/> Previous
             </Button>
-            {currentQuestionIndex < shuffledQuestions.length - 1 ? (
-              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestions.length - 1, prev + 1))} disabled={testSubmitted || isSubmitting || violationDialogState.isOpen}>
+            {currentQuestionIndex < shuffledQuestionsRef.current.length - 1 ? (
+              <Button onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestionsRef.current.length - 1, prev + 1))} disabled={testSubmittedRef.current || isSubmittingRef.current || violationDialogState.isOpen}>
                 Next <ChevronRight className="ml-1 h-4 w-4"/>
               </Button>
             ) : (
@@ -602,7 +716,7 @@ export default function TakeTestPage() {
                     )
                 }} 
                 className="bg-green-600 hover:bg-green-700 text-white" 
-                disabled={isSubmitting || testSubmitted || violationDialogState.isOpen}
+                disabled={isSubmittingRef.current || testSubmittedRef.current || violationDialogState.isOpen}
               >
                 {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4"/>}
                 {isSubmitting ? "Submitting..." : "Submit Test"}
@@ -667,3 +781,4 @@ export default function TakeTestPage() {
     </div>
   );
 }
+
