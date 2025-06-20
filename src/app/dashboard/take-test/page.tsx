@@ -10,7 +10,7 @@ import { Video, Mic, AlertTriangle, ShieldCheck, BookOpen, Timer, ChevronLeft, C
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { getTestQuestions, submitTestAnswers } from '@/ai/flows/test-session-flow';
-import type { TestQuestion, SubmitTestAnswersOutput } from '@/ai/flows/test-session-types'; // Added SubmitTestAnswersOutput
+import type { TestQuestion, SubmitTestAnswersOutput } from '@/ai/flows/test-session-types';
 
 export default function TakeTestPage() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
@@ -76,8 +76,9 @@ export default function TakeTestPage() {
         videoElement.srcObject = currentStream;
         videoElement.play().catch(error => console.warn("Video play failed when setting srcObject:", error));
     }
-  }, [testStarted, hasCameraPermission, hasMicPermission, videoRef, streamRef]);
+  }, [testStarted, hasCameraPermission, hasMicPermission]); // videoRef and streamRef are refs, not needed in deps
 
+  // Effect for component unmount cleanup
   useEffect(() => {
     return () => {
       if (streamRef.current) {
@@ -93,11 +94,32 @@ export default function TakeTestPage() {
     };
   }, []);
 
+
+  const enterFullScreen = useCallback(() => {
+    const elem = document.documentElement;
+    if (elem.requestFullscreen) {
+      elem.requestFullscreen().catch(err => console.warn("Fullscreen request failed:", err.message));
+    } else if ((elem as any).webkitRequestFullscreen) { 
+      (elem as any).webkitRequestFullscreen();
+    } else if ((elem as any).msRequestFullscreen) { 
+      (elem as any).msRequestFullscreen();
+    }
+  }, []);
+
+  const exitFullScreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen:", err.message));
+    }
+  }, []);
+
+
   const handleSubmitTest = useCallback(async (isAutoSubmit = false, autoSubmitReason = "Proctoring violation") => {
     if (testSubmitted || isSubmitting) return;
 
     setIsSubmitting(true);
-    setProctoringWarning(null); // Clear any active warning before submission
+    setProctoringWarning(null); 
+    exitFullScreen(); // Exit fullscreen when test is submitted
+
     try {
       const validAnswers: Record<string, string> = {};
       for (const key in answers) {
@@ -113,13 +135,13 @@ export default function TakeTestPage() {
         autoSubmitReason: isAutoSubmit ? autoSubmitReason : undefined
       });
       
-      setSubmissionDetails(response); // Store full response
+      setSubmissionDetails(response); 
 
       if (response.success) {
         if (isAutoSubmit) {
-             toast({ variant: 'destructive', title: "Test Terminated", description: `Test submitted automatically due to: ${autoSubmitReason}. Score: ${response.score !== undefined ? response.score + '%' : 'N/A'}` });
+             toast({ variant: 'destructive', title: "Test Terminated", description: `Test submitted automatically due to: ${autoSubmitReason}. ${response.message}` });
         } else {
-             toast({ title: "Test Submitted!", description: `Your answers have been recorded. Score: ${response.score !== undefined ? response.score + '%' : 'N/A'}` });
+             toast({ title: "Test Submitted!", description: response.message });
         }
         setTestSubmitted(true);
         setTestStarted(false); 
@@ -131,44 +153,32 @@ export default function TakeTestPage() {
         console.error("Error submitting answers:", error);
     } finally {
         setIsSubmitting(false);
-         if (document.fullscreenElement) {
-            document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on submit:", err.message));
-        }
     }
-  }, [answers, toast, testSubmitted, isSubmitting]);
+  }, [answers, toast, testSubmitted, isSubmitting, exitFullScreen, shuffledQuestions]);
 
 
   useEffect(() => {
     let timerId: NodeJS.Timeout;
-    if (testStarted && timeLeft > 0 && !testSubmitted) {
+    if (testStarted && !testSubmitted && timeLeft > 0) {
       timerId = setInterval(() => {
         setTimeLeft(prevTime => prevTime - 1);
       }, 1000);
-    } else if (testStarted && timeLeft === 0 && !testSubmitted) {
+    } else if (testStarted && !testSubmitted && timeLeft === 0) {
       toast({ title: "Time's Up!", description: "Your test will be submitted automatically." });
       handleSubmitTest(true, "Time expired"); 
     }
     return () => clearInterval(timerId);
   }, [testStarted, timeLeft, testSubmitted, handleSubmitTest, toast]); 
   
+  // Lockdown features effect
  useEffect(() => {
     if (!testStarted || testSubmitted) {
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on cleanup:", err.message));
-      }
+      // If test is not active or already submitted, ensure no lockdown listeners are active.
+      // Fullscreen exit is handled by handleSubmitTest or unmount effect.
       return;
     }
 
-    const enterFullScreen = () => {
-      const elem = document.documentElement;
-      if (elem.requestFullscreen) {
-        elem.requestFullscreen().catch(err => console.warn("Fullscreen request failed:", err.message));
-      } else if ((elem as any).webkitRequestFullscreen) { 
-        (elem as any).webkitRequestFullscreen();
-      } else if ((elem as any).msRequestFullscreen) { 
-        (elem as any).msRequestFullscreen();
-      }
-    };
+    // Attempt to enter fullscreen if not already
     if (!document.fullscreenElement) {
         enterFullScreen();
     }
@@ -187,6 +197,7 @@ export default function TakeTestPage() {
     };
     
     const handleWindowBlur = () => {
+      // Check if focus moved to browser chrome or another app, not just an in-page element like a toast
       if (testStarted && !testSubmitted && document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML')) {
          const reason = "Test window lost focus";
          setProctoringWarning(`AI Alert: ${reason}. Test submitted automatically.`);
@@ -210,13 +221,13 @@ export default function TakeTestPage() {
        const prohibitedKeys = ['F5', 'F11', 'F12', 'PrintScreen', 'ContextMenu', 'Meta', 'AltGraph', 'ScrollLock', 'Pause', 'Insert', 'Home', 'End', 'PageUp', 'PageDown', 'Escape'];
        const isProhibitedCtrlShift = e.ctrlKey && e.shiftKey && prohibitedCtrlShift.includes(e.key.toLowerCase());
        const isProhibitedCtrl = e.ctrlKey && prohibitedCtrl.includes(e.key.toLowerCase());
-       const isProhibitedMeta = e.metaKey && (prohibitedCtrl.includes(e.key.toLowerCase()) || e.key.toLowerCase() === 'meta'); 
+       const isProhibitedMeta = e.metaKey && (prohibitedCtrl.includes(e.key.toLowerCase()) || e.key.toLowerCase() === 'meta' || e.key.toLowerCase() === 'alt'); 
        const isProhibitedKey = prohibitedKeys.includes(e.key) || (e.altKey && e.key === 'Tab');
 
 
       if (isProhibitedCtrlShift || isProhibitedCtrl || isProhibitedMeta || isProhibitedKey) {
         e.preventDefault();
-        const reason = "Prohibited shortcut or action detected";
+        const reason = `Prohibited action detected (${e.key} pressed).`;
         setProctoringWarning(`AI Alert: ${reason}. Test submitted automatically.`);
         handleSubmitTest(true, reason);
       }
@@ -241,14 +252,10 @@ export default function TakeTestPage() {
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
       document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
       document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
-
       document.removeEventListener('contextmenu', disableContextMenu);
       document.removeEventListener('keydown', disableShortcuts);
-      if (document.fullscreenElement) { 
-        document.exitFullscreen().catch(err => console.warn("Error exiting fullscreen on cleanup:", err.message));
-      }
     };
-  }, [testStarted, testSubmitted, handleSubmitTest, toast]);
+  }, [testStarted, testSubmitted, handleSubmitTest, toast, enterFullScreen]);
 
 
   const handleStartTest = async () => {
@@ -285,10 +292,11 @@ export default function TakeTestPage() {
       setCurrentQuestionIndex(0);
       setAnswers({});
       setTimeLeft(120 * 60); 
-      setTestStarted(true);
-      setTestSubmitted(false);
-      setSubmissionDetails(null);
       setProctoringWarning(null);
+      setSubmissionDetails(null);
+      setTestSubmitted(false); // Ensure test is not marked as submitted before starting
+      setTestStarted(true);   // Set test started to true
+      enterFullScreen();      // Attempt to enter fullscreen
       
     } catch (error) {
       toast({ variant: 'destructive', title: "Failed to Load Test", description: "Could not fetch test questions. Please try again."});
@@ -307,7 +315,7 @@ export default function TakeTestPage() {
   };
 
   const handleAnswerChange = (questionId: number, answer: string) => {
-    if (testSubmitted) return;
+    if (testSubmitted || isSubmitting) return;
     setAnswers(prev => ({ ...prev, [questionId.toString()]: answer }));
   };
   
@@ -331,7 +339,7 @@ export default function TakeTestPage() {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-10rem)]">
         <Card className="w-full max-w-lg p-8 text-center">
-          <CheckCircle className={`h-16 w-16 mx-auto mb-4 ${submissionDetails.proctoringViolation ? 'text-destructive' : (submissionDetails.passed ? 'text-green-500' : 'text-yellow-500')}`} />
+          <CheckCircle className={`h-16 w-16 mx-auto mb-4 ${submissionDetails.proctoringViolation ? 'text-destructive' : (submissionDetails.passed === true ? 'text-green-500' : (submissionDetails.passed === false ? 'text-yellow-500' : 'text-muted-foreground'))}`} />
           <CardTitle className="text-2xl">Test Submitted!</CardTitle>
           <CardDescription className="mt-2 mb-4">
             {submissionDetails.message || "Your answers have been recorded."}
@@ -580,3 +588,4 @@ export default function TakeTestPage() {
     </div>
   );
 }
+
