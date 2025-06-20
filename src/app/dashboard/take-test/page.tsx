@@ -126,11 +126,12 @@ export default function TakeTestPage() {
 
     try {
       const validAnswers: Record<string, string> = {};
-      for (const key in answers) {
-        if (answers[key] !== undefined && answers[key] !== null) {
-          validAnswers[key.toString()] = answers[key];
+      shuffledQuestions.forEach(q => { // Iterate over shuffledQuestions to ensure all question IDs are considered
+        const answer = answers[q.id.toString()];
+        if (answer !== undefined && answer !== null) {
+          validAnswers[q.id.toString()] = answer;
         }
-      }
+      });
       
       const response = await submitTestAnswers({ 
         testId: 'SAMPLE_TEST_001', 
@@ -143,7 +144,7 @@ export default function TakeTestPage() {
 
       if (response.success) {
         if (isAutoSubmit) {
-             toast({ variant: 'destructive', title: "Test Terminated", description: `Test submitted automatically after violation: ${autoSubmitReason}. ${response.message}` });
+             toast({ variant: 'destructive', title: "Test Terminated", description: `Test submitted automatically: ${autoSubmitReason}. ${response.message}` });
         } else {
              toast({ title: "Test Submitted!", description: response.message });
         }
@@ -204,25 +205,33 @@ export default function TakeTestPage() {
 
     const handleVisibilityChange = () => {
       if (document.hidden && testStarted && !testSubmitted && !isSubmitting && !violationDialogState.isOpen) {
-        const reason = "Tab switched or window minimized";
-        showViolationWarningDialog(reason, () => handleSubmitTest(true, reason));
+        const reason = "Tab switched or window minimized. This is a violation.";
+        showViolationWarningDialog(
+            reason, 
+            () => handleSubmitTest(true, "Tab switched or window minimized"),
+            () => {} // If user cancels, they are back, test continues
+        );
       }
     };
     
     const handleWindowBlur = () => {
       if (testStarted && !testSubmitted && document.activeElement && (document.activeElement.tagName === 'BODY' || document.activeElement.tagName === 'HTML') && !isSubmitting && !violationDialogState.isOpen) {
-         const reason = "Test window lost focus";
-         showViolationWarningDialog(reason, () => handleSubmitTest(true, reason));
+         const reason = "Test window lost focus. This is a violation.";
+         showViolationWarningDialog(
+            reason, 
+            () => handleSubmitTest(true, "Test window lost focus"),
+            () => {} // If user cancels, they are back, test continues
+        );
       }
     };
 
     const handleFullscreenChange = () => {
         if (!document.fullscreenElement && testStarted && !testSubmitted && !isSubmitting && !violationDialogState.isOpen) {
-            const reason = "Fullscreen mode exited";
+            const reason = "Fullscreen mode exited. This is a violation.";
             showViolationWarningDialog(
               reason, 
-              () => handleSubmitTest(true, reason),
-              () => { if(testStarted && !testSubmitted) enterFullScreen(); } // Attempt to re-enter fullscreen on cancel
+              () => handleSubmitTest(true, "Fullscreen mode exited"),
+              () => { if(testStarted && !testSubmitted) enterFullScreen(); } 
             );
         }
     };
@@ -239,11 +248,7 @@ export default function TakeTestPage() {
        const isProhibitedKey = prohibitedKeys.includes(e.key) || (e.altKey && e.key === 'Tab');
 
       if (isProhibitedCtrlShift || isProhibitedCtrl || isProhibitedMeta || isProhibitedKey) {
-        e.preventDefault();
-        if (testStarted && !testSubmitted && !isSubmitting && !violationDialogState.isOpen) {
-            const reason = `Prohibited action detected (${e.key} pressed)`;
-            showViolationWarningDialog(reason, () => handleSubmitTest(true, reason));
-        }
+        e.preventDefault(); // Only prevent the default action. No dialog, no auto-submit.
       }
     };
     
@@ -461,7 +466,7 @@ export default function TakeTestPage() {
         </Card>
         {violationDialogState.isOpen && (
           <AlertDialog open={violationDialogState.isOpen} onOpenChange={(open) => {
-            if (!open) { // If dialog is closed (e.g. by ESC or clicking away)
+            if (!open) { 
                 if (violationDialogState.onCancel) violationDialogState.onCancel();
                 else setViolationDialogState(prev => ({ ...prev, isOpen: false }));
             }
@@ -471,6 +476,8 @@ export default function TakeTestPage() {
                 <AlertDialogTitle className="flex items-center gap-2"><AlertTriangle className="text-destructive"/> Proctoring Alert</AlertDialogTitle>
                 <AlertDialogDescription>
                   {violationDialogState.reason}
+                  <br/><br/>
+                  Confirming this action will result in your test being submitted immediately and may be flagged for review.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -591,7 +598,7 @@ export default function TakeTestPage() {
                     showViolationWarningDialog(
                         "Are you sure you want to submit your test? This action cannot be undone.",
                         () => handleSubmitTest(false, "Manual submission"),
-                        () => {} // Do nothing on cancel for manual submit confirmation
+                        () => {} 
                     )
                 }} 
                 className="bg-green-600 hover:bg-green-700 text-white" 
@@ -619,7 +626,7 @@ export default function TakeTestPage() {
              </CardHeader>
              <ScrollArea>
               <CardContent className="p-3 text-xs space-y-1 text-muted-foreground">
-                  <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Fullscreen Active (Attempted)</p>
+                  <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Fullscreen Active</p>
                   <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Tab Focus Monitored</p>
                   <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Fullscreen Exit Monitored</p>
                   <p className="flex items-center gap-1"><CheckCircle className="h-3 w-3 text-green-500"/> Page Exit/Refresh Warnings Active</p>
@@ -633,11 +640,11 @@ export default function TakeTestPage() {
       </div>
       {violationDialogState.isOpen && (
          <AlertDialog open={violationDialogState.isOpen} onOpenChange={(open) => {
-            if (!open) { // If dialog is closed (e.g. by ESC or clicking away)
+            if (!open) { 
                 if (violationDialogState.onCancel) {
                     violationDialogState.onCancel();
                 } else {
-                    setViolationDialogState(prev => ({ ...prev, isOpen: false, reason: '', onConfirm: () => {}, onCancel: () => {} }));
+                    setViolationDialogState(prev => ({ ...prev, isOpen: false, reason: '', onConfirm: () => {}, onCancel: undefined }));
                 }
             }
           }}>
@@ -645,9 +652,9 @@ export default function TakeTestPage() {
             <AlertDialogHeader>
               <AlertDialogTitle className="flex items-center gap-2"><AlertTriangle className="text-destructive h-6 w-6"/> Proctoring Violation Alert</AlertDialogTitle>
               <AlertDialogDescription className="py-4">
-                {violationDialogState.reason}.
+                {violationDialogState.reason}
                 <br/><br/>
-                Continuing this action or acknowledging this warning will result in your test being submitted immediately and may be flagged for review.
+                Confirming this action will result in your test being submitted immediately and may be flagged for review.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -660,6 +667,3 @@ export default function TakeTestPage() {
     </div>
   );
 }
-
-
-  
