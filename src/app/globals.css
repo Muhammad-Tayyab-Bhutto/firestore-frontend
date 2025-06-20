@@ -9,11 +9,11 @@ body {
 
 @layer base {
   :root {
-    /* New Theme: Deep Blue, Ivory White, Teal, Academic Orange/Gold */
-    --background: 60 100% 97%; /* Ivory White (#FCFFF2) */
+    /* New Theme: Deep Blue, Pure White, Teal, Academic Orange/Gold */
+    --background: 0 0% 100%; /* Pure White */
     --foreground: 220 35% 20%; /* Dark Deep Blue for text (#26324C) */
     
-    --card: 0 0% 100%; /* White cards for clarity, or 60 100% 98% for off-ivory */
+    --card: 0 0% 100%; /* White cards for clarity */
     --card-foreground: 220 35% 20%;
 
     --popover: 0 0% 100%;
